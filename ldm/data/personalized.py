@@ -8,6 +8,15 @@ from torchvision import transforms
 import json
 import random
 from .mask_generate import generate_mask
+
+
+def _pil_resample(name):
+    """Pillow 9/10 compatible resampling constant."""
+    if name == "LINEAR":
+        name = "BILINEAR"
+    resampling = getattr(PIL.Image, "Resampling", PIL.Image)
+    return getattr(resampling, name, getattr(PIL.Image, name))
+
 from .dataset_paths import (
     list_image_files,
     normalize_gt_mask_array,
@@ -166,10 +175,10 @@ class Personalized_mvtec_encoder(Dataset):
         if data_enhance:
             size=512
         self.size = size
-        self.interpolation = {"linear": PIL.Image.LINEAR,
-                              "bilinear": PIL.Image.BILINEAR,
-                              "bicubic": PIL.Image.BICUBIC,
-                              "lanczos": PIL.Image.LANCZOS,
+        self.interpolation = {"linear": _pil_resample("LINEAR"),
+                              "bilinear": _pil_resample("BILINEAR"),
+                              "bicubic": _pil_resample("BICUBIC"),
+                              "lanczos": _pil_resample("LANCZOS"),
                               }[interpolation]
         self.flip = transforms.RandomHorizontalFlip(p=flip_p)
         cnt=0
@@ -333,10 +342,10 @@ class Personalized_mvtec_mask(Dataset):
             self._length = 4
 
         self.size = size
-        self.interpolation = {"linear": PIL.Image.LINEAR,
-                              "bilinear": PIL.Image.BILINEAR,
-                              "bicubic": PIL.Image.BICUBIC,
-                              "lanczos": PIL.Image.LANCZOS,
+        self.interpolation = {"linear": _pil_resample("LINEAR"),
+                              "bilinear": _pil_resample("BILINEAR"),
+                              "bicubic": _pil_resample("BICUBIC"),
+                              "lanczos": _pil_resample("LANCZOS"),
                               }[interpolation]
         self.flip = transforms.RandomHorizontalFlip(p=flip_p)
     def __len__(self):
@@ -416,10 +425,10 @@ class Positive_sample_with_generated_mask(Dataset):
             self._length = 4
 
         self.size = size
-        self.interpolation = {"linear": PIL.Image.LINEAR,
-                              "bilinear": PIL.Image.BILINEAR,
-                              "bicubic": PIL.Image.BICUBIC,
-                              "lanczos": PIL.Image.LANCZOS,
+        self.interpolation = {"linear": _pil_resample("LINEAR"),
+                              "bilinear": _pil_resample("BILINEAR"),
+                              "bicubic": _pil_resample("BICUBIC"),
+                              "lanczos": _pil_resample("LANCZOS"),
                               }[interpolation]
         self.flip = transforms.RandomHorizontalFlip(p=flip_p)
         self.random_mask=random_mask
