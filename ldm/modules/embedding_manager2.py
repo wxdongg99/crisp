@@ -2,6 +2,7 @@ import torch
 from torch import nn
 
 from ldm.data.personalized import per_img_token_list
+from ldm.data.dataset_paths import parse_name_anomaly_file
 from transformers import CLIPTokenizer
 from functools import partial
 from ldm.models.vit import VisionTransformer as VIT
@@ -53,9 +54,13 @@ class EmbeddingManager(nn.Module):
         super().__init__()
         self.return_position=return_position
         self.spatial_encoder = False
+        self.training_stage = "single"
         self.string_to_token_dict = {}
 
         self.string_to_param_dict = nn.ParameterDict()
+        self.bg_token_embeddings = nn.ParameterDict()
+        self.bg_token_k = 0
+        self.bg_token_frozen = False
 
         self.initial_embeddings = nn.ParameterDict()  # These should not be optimized
 
@@ -74,13 +79,18 @@ class EmbeddingManager(nn.Module):
             get_token_for_string = partial(get_bert_token_for_string, embedder.tknz_fn)
             get_embedding_for_tkn = embedder.transformer.token_emb
             token_dim = 1280
+        self._get_token_for_string = get_token_for_string
+        self._get_embedding_for_tkn = get_embedding_for_tkn
+        self.token_dim = token_dim
         print(placeholder_strings)  # 是"*"
         print(initializer_words)  # 是一个单词
         if per_image_tokens:
             placeholder_strings.extend(per_img_token_list)
         name_anomaly_file = 'name-anomaly.txt'
-        with open(name_anomaly_file,'r') as f:
-            sample_anomaly_pairs=f.read().split('\n')
+        sample_anomaly_pairs = [
+            f'{sample}+{anomaly}'
+            for sample, anomaly in parse_name_anomaly_file(name_anomaly_file)
+        ]
         for name in sample_anomaly_pairs:
             for idx, placeholder_string in enumerate(placeholder_strings):
 
@@ -134,6 +144,49 @@ class EmbeddingManager(nn.Module):
                     max_step_tokens = 1 + self.progressive_counter // PROGRESSIVE_SCALE
                 else:  # 执行这个
                     max_step_tokens = self.max_vectors_per_token
+                # Stage 0: condition on bg tokens only (no class TI, no PSP).
+                if str(getattr(self, "training_stage", "")).upper() == "0" \
+                        and self.bg_token_k > 0 and len(self.bg_token_embeddings) > 0:
+                    placeholder_embedding = self.get_bg_token(
+                        name,
+                        device=placeholder_embedding.device,
+                        dtype=placeholder_embedding.dtype)
+                    num_vectors_for_token = placeholder_embedding.shape[1]
+                    placeholder_rows, placeholder_cols = torch.where(
+                        tokenized_text == placeholder_token.to(device))
+                    if placeholder_rows.nelement() == 0:
+                        continue
+                    sorted_cols, sort_idx = torch.sort(
+                        placeholder_cols, descending=True)
+                    sorted_rows = placeholder_rows[sort_idx]
+                    position = torch.zeros(tokenized_text.size(0), 2)
+                    for idx in range(len(sorted_rows)):
+                        row = sorted_rows[idx]
+                        col = sorted_cols[idx]
+                        new_token_row = torch.cat(
+                            [tokenized_text[row][:col],
+                             placeholder_token.repeat(
+                                 num_vectors_for_token).to(device),
+                             tokenized_text[row][col + 1:]], dim=0)[:n]
+                        new_embed_row = torch.cat(
+                            [embedded_text[row][:col],
+                             placeholder_embedding[row, :num_vectors_for_token],
+                             embedded_text[row][col + 1:]], dim=0)[:n]
+                        embedded_text[row] = new_embed_row
+                        tokenized_text[row] = new_token_row
+                        position[row][0] = col
+                        position[row][1] = col + num_vectors_for_token
+                    continue
+                # Stage-A/external stages: prepend the frozen background
+                # token block to [class_TI | PSP].
+                if self.bg_token_k > 0 and len(self.bg_token_embeddings) > 0:
+                    bg_tok = self.get_bg_token(
+                        name,
+                        device=placeholder_embedding.device,
+                        dtype=placeholder_embedding.dtype)
+                    if bg_tok is not None:
+                        placeholder_embedding = torch.cat(
+                            [bg_tok, placeholder_embedding], dim=1)
                 if self.spatial_encoder and img is not None:
                     placeholder_embedding2 = self.spatial_encoder_model(img)
                     placeholder_embedding= torch.cat([placeholder_embedding,placeholder_embedding2],dim=1)
@@ -186,23 +239,90 @@ class EmbeddingManager(nn.Module):
                         embedded_text[row] = new_embed_row
                         tokenized_text[row] = new_token_row
         return embedded_text,position
+
+    def prepare_bg_token_embeddings(self, k_bg=4, init_word="background",
+                                    class_names=None):
+        """Initialise one K-token background bank per class."""
+        k_bg = int(k_bg)
+        if k_bg <= 0:
+            raise ValueError(f"bg_token_k must be > 0, got {k_bg}")
+        token = self._get_token_for_string(init_word)
+        with torch.no_grad():
+            init = self._get_embedding_for_tkn(token.cpu())
+        names = class_names or list(self.string_to_param_dict.keys())
+        for name in names:
+            if name in self.bg_token_embeddings:
+                continue
+            weight = init.unsqueeze(0).repeat(k_bg, 1).clone().detach()
+            self.bg_token_embeddings[name] = nn.Parameter(
+                weight, requires_grad=True)
+        self.bg_token_k = k_bg
+        print(f"[BgTokenTI] prepared: K_bg={k_bg}, "
+              f"classes={len(self.bg_token_embeddings)}, init_word={init_word!r}")
+
+    def freeze_bg_token_embeddings(self, freeze=True):
+        self.bg_token_frozen = bool(freeze)
+        for p in self.bg_token_embeddings.parameters():
+            p.requires_grad_(not self.bg_token_frozen)
+        print(f"[BgTokenTI] frozen={self.bg_token_frozen}")
+
+    def get_bg_token(self, name, device=None, dtype=None):
+        """Return [B, K_bg, D] background tokens for class names."""
+        if self.bg_token_k <= 0 or len(self.bg_token_embeddings) == 0:
+            return None
+        if name is None:
+            name = list(self.bg_token_embeddings.keys())[:1]
+        if isinstance(name, str):
+            name = [name]
+        bank = []
+        any_param = next(iter(self.bg_token_embeddings.values()))
+        device = device if device is not None else any_param.device
+        dtype = dtype if dtype is not None else any_param.dtype
+        for nm in name:
+            tok = self.bg_token_embeddings.get(nm, None)
+            if tok is None:
+                raise KeyError(
+                    f"[BgTokenTI] no bg_token for class {nm!r}; available="
+                    f"{list(self.bg_token_embeddings.keys())[:8]}")
+            bank.append(tok.to(device=device, dtype=dtype))
+        return torch.stack(bank, dim=0)
+
     def prepare_spatial_encoder(self,text_num=4):
         self.spatial_encoder = True
         self.spatial_encoder_model = psp_encoders.GradualStyleEncoder(text_num=text_num).cuda()
 
     def save(self, ckpt_path):
-        torch.save({"string_to_token": self.string_to_token_dict,
-                    "string_to_param": self.string_to_param_dict}, ckpt_path)
+        save_dict = {
+            "string_to_token": self.string_to_token_dict,
+            "string_to_param": self.string_to_param_dict,
+        }
+        if len(self.bg_token_embeddings) > 0:
+            save_dict["bg_token_embeddings"] = {
+                k: v.detach().cpu() for k, v in self.bg_token_embeddings.items()
+            }
+            save_dict["bg_token_k"] = int(self.bg_token_k)
+        torch.save(save_dict, ckpt_path)
 
     def load(self, ckpt_path):
         ckpt = torch.load(ckpt_path, map_location='cpu')
 
         self.string_to_token_dict = ckpt["string_to_token"]
         tmp = ckpt['string_to_param']
-        # for i in tmp.keys():
-        #     tmp[i] = torch.cat([tmp[i], torch.zeros(4, 1280)], dim=0)
         self.string_to_param_dict = tmp.cuda()
-        # self.string_to_param_dict = ckpt["string_to_param"]
+        if 'bg_token_embeddings' in ckpt:
+            k_bg = int(ckpt.get('bg_token_k', 0))
+            if k_bg > 0 and len(self.bg_token_embeddings) == 0:
+                self.prepare_bg_token_embeddings(
+                    k_bg=k_bg,
+                    class_names=list(ckpt['bg_token_embeddings'].keys()))
+            loaded = 0
+            for k, v in ckpt['bg_token_embeddings'].items():
+                if k in self.bg_token_embeddings:
+                    cur = self.bg_token_embeddings[k]
+                    cur.data.copy_(v.to(device=cur.device, dtype=cur.dtype))
+                    loaded += 1
+            print(f'[BgTokenTI] loaded {loaded}/{len(ckpt["bg_token_embeddings"])} '
+                  f'from {ckpt_path}')
 
     def get_embedding_norms_squared(self):
         all_params = torch.cat(list(self.string_to_param_dict.values()), axis=0)  # num_placeholders x embedding_dim
@@ -211,7 +331,10 @@ class EmbeddingManager(nn.Module):
         return param_norm_squared
 
     def embedding_parameters(self):
-        return self.string_to_param_dict.parameters()
+        params = list(self.string_to_param_dict.parameters())
+        if self.bg_token_k > 0 and not self.bg_token_frozen:
+            params += list(self.bg_token_embeddings.parameters())
+        return params
 
     def embedding_to_coarse_loss(self):
 

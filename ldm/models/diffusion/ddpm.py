@@ -10,6 +10,7 @@ import torch
 from torchvision import transforms
 import torch.nn as nn
 import os
+import copy
 import numpy as np
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import LambdaLR
@@ -26,6 +27,8 @@ from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianD
 from ldm.models.autoencoder import VQModelInterface, IdentityFirstStage, AutoencoderKL
 from ldm.modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
 from ldm.models.diffusion.ddim import DDIMSampler
+from ldm.models.diffusion.lfp import tbf_resize_mask
+from ldm.models.diffusion.bprc import bprc_residual_loss
 #from ldm.models.vit import VisionTransformer as VIT
 import random
 __conditioning_keys__ = {'concat': 'c_concat',
@@ -451,6 +454,11 @@ class LatentDiffusion(DDPM):
         self.test_dataset=False
         self.attention_mask=False
         self.log_loss=False
+        self.training_stage='single'
+        self.mask_pool_type='tbf'
+        self.stage_b_residual_enabled=False
+        self.v10_bprc_alpha=1.0
+        self._stage_a_embedding_manager=None
         self.num_timesteps_cond = default(num_timesteps_cond, 1)
         self.scale_by_std = scale_by_std
         assert self.num_timesteps_cond <= kwargs['timesteps']
@@ -604,11 +612,12 @@ class LatentDiffusion(DDPM):
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
         return self.scale_factor * z
 
-    def get_learned_conditioning(self, c,x=None,name=None):
+    def get_learned_conditioning(self, c,x=None,name=None,embedding_manager=None):
         position=None
+        em = self.embedding_manager if embedding_manager is None else embedding_manager
         if self.cond_stage_forward is None:
             if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
-                c,position = self.cond_stage_model.encode(c, cond_img=x,embedding_manager=self.embedding_manager,name=name)
+                c,position = self.cond_stage_model.encode(c, cond_img=x,embedding_manager=em,name=name)
                 if isinstance(c, DiagonalGaussianDistribution):
                     c = c.mode()
             else:
@@ -1013,7 +1022,88 @@ class LatentDiffusion(DDPM):
         else: #执行这个
             return self.first_stage_model.encode(x)
 
+    def enable_stage_b_residual(self, stage_a_ckpt_root, init_from="random",
+                                alpha=1.0):
+        """Enable CRISP Stage-B residual (BPRC) training.
+
+        Frozen Stage-A principal is loaded into a separate embedding manager;
+        ``self.embedding_manager`` remains the trainable residual path.
+        """
+        ckpt_dir = os.path.join(stage_a_ckpt_root, "checkpoints")
+        if not os.path.isdir(ckpt_dir):
+            ckpt_dir = stage_a_ckpt_root
+        embed_path = os.path.join(ckpt_dir, "embeddings.pt")
+        spatial_path = os.path.join(ckpt_dir, "spatial_encoder.pt")
+        if not os.path.isfile(embed_path):
+            raise FileNotFoundError(
+                f"Stage-A embeddings not found: {embed_path}")
+
+        frozen = copy.deepcopy(self.embedding_manager)
+        frozen.load(embed_path)
+        if getattr(frozen, "spatial_encoder_model", None) is not None \
+                and os.path.isfile(spatial_path):
+            frozen.spatial_encoder_model.load_state_dict(
+                torch.load(spatial_path, map_location="cpu"))
+        for p in frozen.parameters():
+            p.requires_grad_(False)
+        frozen.eval()
+        frozen.training_stage = "A"
+        self._stage_a_embedding_manager = frozen
+
+        if str(init_from) == "stage_a":
+            self.embedding_manager.load(embed_path)
+            if getattr(self.embedding_manager, "spatial_encoder_model", None) \
+                    is not None and os.path.isfile(spatial_path):
+                self.embedding_manager.spatial_encoder_model.load_state_dict(
+                    torch.load(spatial_path, map_location="cpu"))
+            for p in self.embedding_manager.parameters():
+                p.requires_grad_(True)
+
+        self.stage_b_residual_enabled = True
+        self.v10_bprc_alpha = float(alpha)
+        self.training_stage = "B"
+        self.embedding_manager.training_stage = "B"
+        print(f"[Stage-B] residual enabled: alpha={alpha}, "
+              f"init_from={init_from}, Stage-A={embed_path}")
+
+    def p_losses_stage_b(self, x_start, cond_a, cond_b, t,
+                         mask=None, noise=None):
+        """BPRC residual loss: Stage-B fits ``noise - sg(eps_A)``."""
+        noise = default(noise, lambda: torch.randn_like(x_start))
+        if mask is not None:
+            mask = self._resize_mask_to_latent(
+                mask,
+                target_size=self.model.diffusion_model.image_size,
+                downsample_method=getattr(self, 'mask_pool_type', 'tbf'))
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+        with torch.no_grad():
+            eps_a = self.apply_model(x_noisy, t, cond_a, mask=mask)
+        eps_r = self.apply_model(x_noisy, t, cond_b, mask=mask)
+        loss = bprc_residual_loss(eps_r, noise, eps_a, mask=mask)
+        prefix = 'train' if self.training else 'val'
+        loss_dict = {
+            f'{prefix}/loss_simple': loss,
+            f'{prefix}/loss': loss,
+        }
+        return loss, loss_dict
+
     def shared_step(self, batch, **kwargs):
+        if getattr(self, 'stage_b_residual_enabled', False):
+            x, c, total_dict = self.get_input(batch, self.first_stage_key)
+            mask = total_dict.get('mask', None)
+            mask_cond = total_dict.get('mask_cond', mask)
+            name = total_dict.get('name', None)
+            cond_b, _ = self.get_learned_conditioning(
+                c, x=mask_cond, name=name,
+                embedding_manager=self.embedding_manager)
+            with torch.no_grad():
+                cond_a, _ = self.get_learned_conditioning(
+                    c, x=mask_cond, name=name,
+                    embedding_manager=self._stage_a_embedding_manager)
+            t = torch.randint(0, self.num_timesteps, (x.shape[0],),
+                              device=self.device).long()
+            return self.p_losses_stage_b(
+                x, cond_a, cond_b, t, mask=mask)
         x, c,total_dict = self.get_input(batch, self.first_stage_key)
         loss = self(x, c,**total_dict)
         return loss
@@ -1163,11 +1253,10 @@ class LatentDiffusion(DDPM):
     def p_losses(self, x_start, cond, t,mask=None, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
         if mask is not None:
-            #mask=mask.unsqueeze(1)
-            reisze_32=transforms.Resize((32,32))
-            mask=reisze_32(mask)
-            mask[mask < 0.5] = 0
-            mask[mask >= 0.5] = 1
+            mask = self._resize_mask_to_latent(
+                mask,
+                target_size=self.model.diffusion_model.image_size,
+                downsample_method=getattr(self, 'mask_pool_type', 'tbf'))
             #mask=1-mask
         #print(mask,mask.mean())
         #x_start=torch.zeros_like(x_start)*mask+(1-mask)*x_start
@@ -1420,10 +1509,62 @@ class LatentDiffusion(DDPM):
 
         return samples, intermediates
 
+    def _resize_mask_to_latent(self, mask, target_size=None, downsample_method="tbf"):
+        """CRISP LFP mask projection (default) with legacy bilinear fallback.
+
+        ``downsample_method="tbf"`` (default) is the CRISP LFP
+        (Trim + Bilinear + Fill) projection:
+        VAE-encode the mask -> per-channel Otsu -> union -> trim border ->
+        max with bilinear support -> fill holes.
+
+        Explicit ``downsample_method="bilinear"`` enables the original
+        AnomalyDiffusion behaviour (plain bilinear resize + threshold).
+        """
+        if target_size is None:
+            target_size = self.model.diffusion_model.image_size
+        if isinstance(target_size, int):
+            target_h, target_w = target_size, target_size
+        else:
+            target_h, target_w = target_size
+
+        if mask.dim() == 3:
+            mask = mask.unsqueeze(1)
+        original_h, original_w = mask.shape[-2], mask.shape[-1]
+        if target_h == original_h and target_w == original_w:
+            return (mask >= 0.5).float()
+
+        # CRISP large-mask fallback: masks covering >20% of pixels use plain
+        # bilinear instead of LFP. ``force_lfp_mask`` can override this for
+        # tbf, matching CRISP's --force_lfp_mask behaviour.
+        white_ratio = mask.float().mean().item()
+        force_lfp_mask = bool(getattr(self, "force_lfp_mask", False))
+        if white_ratio > 0.2 and not (
+                force_lfp_mask and downsample_method == "tbf"):
+            resized = torch.nn.functional.interpolate(
+                mask.float(), size=(target_h, target_w),
+                mode="bilinear", align_corners=False)
+            return (resized >= 0.5).float()
+
+        if downsample_method == "bilinear":
+            resized = torch.nn.functional.interpolate(
+                mask.float(), size=(target_h, target_w),
+                mode="bilinear", align_corners=False)
+            return (resized >= 0.5).float()
+
+        if downsample_method in (None, "tbf"):
+            return tbf_resize_mask(
+                mask, target_h, target_w,
+                vae=self.first_stage_model,
+                scale_factor=self.scale_factor)
+
+        raise ValueError(
+            "downsample_method must be 'tbf' (LFP, default), None, or "
+            f"'bilinear', got {downsample_method!r}")
+
     #@torch.no_grad()
     def log_images(self, batch, N=8, n_row=4, sample=True, unconditional_only=False,ddim_steps=200, ddim_eta=1., return_keys=None,
                    quantize_denoised=True, inpaint=True, plot_denoise_rows=False, plot_progressive_rows=False,
-                   plot_diffusion_rows=False,adaptive_mask=False, **kwargs):
+                   plot_diffusion_rows=False,adaptive_mask=False, downsample_method="tbf", **kwargs):
         use_ddim = ddim_steps is not None
         log = dict()
         z, c,total_dict, x, xrec, xc = self.get_input(batch, self.first_stage_key,
@@ -1434,10 +1575,10 @@ class LatentDiffusion(DDPM):
         if 'mask' in total_dict:
             mask=total_dict['mask']
             log["mask"] = mask
-            reisze_32=transforms.Resize((32,32))
-            mask=reisze_32(mask)
-            mask[mask < 0.5] = 0
-            mask[mask >= 0.5] = 1
+            target_size = self.model.diffusion_model.image_size
+            mask = self._resize_mask_to_latent(
+                mask, target_size=target_size,
+                downsample_method=downsample_method)
             #mask=1-mask
         N = min(x.shape[0], N)
         n_row = min(x.shape[0], n_row)

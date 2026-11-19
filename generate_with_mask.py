@@ -103,12 +103,27 @@ if __name__ == "__main__":
         action="store_true", default=False,
         help='whether use adaptive attention reweighting',
     )
+    parser.add_argument(
+        "--downsample_method",
+        type=str, default="tbf",
+        choices=["bilinear", "tbf"],
+        help="Mask-to-latent projection. Default 'tbf' = CRISP LFP "
+             "(Trim + Bilinear + Fill); pass 'bilinear' for the original "
+             "AnomalyDiffusion bilinear result.",
+    )
 
+    parser.add_argument(
+        "--force_lfp_mask",
+        action="store_true", default=False,
+        help="Disable CRISP's >20% large-mask bilinear fallback and force "
+             "LFP (tbf) projection even for large masks.",
+    )
     # setup_seed(42)
     opt = parser.parse_args()
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune-encoder+embedding.yaml")
     actual_resume = './models/ldm/text2img-large/model.ckpt'
     model = load_model_from_config(config, actual_resume)
+    model.force_lfp_mask = bool(opt.force_lfp_mask)
     sample_name=opt.sample_name
     anomaly_name=opt.anomaly_name
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -137,7 +152,7 @@ if __name__ == "__main__":
                 with model.ema_scope():
                     mask=batch['mask'].cpu()
                     ori_images=batch['image'].permute(0,3,1,2)
-                    images=model.log_images(batch,sample=False,inpaint=True,unconditional_only=True,adaptive_mask=opt.adaptive_mask)
+                    images=model.log_images(batch,sample=False,inpaint=True,unconditional_only=True,adaptive_mask=opt.adaptive_mask,downsample_method=opt.downsample_method)
                     imgs=images['samples_inpainting'].cpu()
                     recon_image=images['reconstruction']
                     for i in range(len(imgs)):

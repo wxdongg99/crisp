@@ -8,6 +8,12 @@ from torchvision import transforms
 import json
 import random
 from .mask_generate import generate_mask
+from .dataset_paths import (
+    list_image_files,
+    normalize_gt_mask_array,
+    pair_image_mask_files,
+    parse_name_anomaly_file,
+)
 import cv2
 from utils import random_transform
 import numpy as np
@@ -154,12 +160,8 @@ class Personalized_mvtec_encoder(Dataset):
         if data_enhance:
             self.data_enhance=random_transform()
         self.data_root=mvtec_path
-        sample_anomaly_pairs=[]
-        with open(os.path.join('name-anomaly.txt'),'r') as f:
-            data=f.read().split('\n')
-            for i in data:
-                sample_name,anomaly_name=i.split('+')
-                sample_anomaly_pairs.append((sample_name,anomaly_name))
+        sample_anomaly_pairs = parse_name_anomaly_file(
+            os.path.join('name-anomaly.txt'))
         self.data=[]
         if data_enhance:
             size=512
@@ -175,16 +177,11 @@ class Personalized_mvtec_encoder(Dataset):
             print(sample_name,anomaly_name)
             img_path=os.path.join(self.data_root,sample_name,'test',anomaly_name)
             mask_path=os.path.join(self.data_root,sample_name,'ground_truth',anomaly_name)
-            img_files=os.listdir(img_path)
-            mask_files=os.listdir(mask_path)
-            img_files.sort(key=lambda x:int(x[:3]))
-            mask_files.sort(key=lambda x: int(x[:3]))
-            img_files=[os.path.join(img_path,file_name) for file_name in img_files]
-            mask_files=[os.path.join(mask_path,file_name) for file_name in mask_files]
+            img_files, mask_files = pair_image_mask_files(img_path, mask_path)
             for idx in range(len(img_files)):
-                if set=='train' and idx>len(img_files)//3:
+                if set in ('train', 'bg_only') and idx>len(img_files)//3:
                     break
-                if set!='train':
+                if set not in ('train', 'bg_only'):
                     if idx<len(img_files)//3:
                         continue
                     elif idx>len(img_files)//3+1:
@@ -202,12 +199,44 @@ class Personalized_mvtec_encoder(Dataset):
                 image = image.resize((size, size), resample=self.interpolation)
                 mask = mask.resize((size, size), resample=self.interpolation)
                 image = np.array(image).astype(np.uint8)
-                mask = np.array(mask).astype(np.float32)
+                mask = normalize_gt_mask_array(np.array(mask))
                 image= (image / 127.5 - 1.0).astype(np.float32)
-                mask = mask / 255.0
-                mask[mask < 0.5] = 0
-                mask[mask >= 0.5] = 1
                 self.data.append((image,mask,sample_name+'+'+anomaly_name))
+
+        # Stage-0 bg-token supervision: train only on background pixels.
+        # Anomaly samples keep background (inverted mask = 1); normal images
+        # are appended with an all-one mask.
+        if set == 'bg_only':
+            inverted = []
+            for img, msk, name in self.data:
+                bg = 1.0 - msk.astype(np.float32)
+                bg = (bg >= 0.5).astype(np.float32)
+                inverted.append((img, bg, name))
+            self.data = inverted
+            n_anomaly = len(self.data)
+            for sample_name, anomaly_name in sample_anomaly_pairs:
+                cls_key = sample_name + '+' + anomaly_name
+                good_dir = os.path.join(
+                    self.data_root, sample_name, 'train', 'good')
+                per_class_dir = os.path.join(good_dir, anomaly_name)
+                if os.path.isdir(per_class_dir):
+                    good_dir = per_class_dir
+                if not os.path.isdir(good_dir):
+                    print(f'[BgOnly] WARN: missing normal dir {good_dir}')
+                    continue
+                good_files = list_image_files(good_dir)
+                for fname in good_files:
+                    image = Image.open(os.path.join(good_dir, fname))
+                    if image.mode != 'RGB':
+                        image = image.convert('RGB')
+                    image = image.resize(
+                        (size, size), resample=self.interpolation)
+                    image = np.array(image).astype(np.uint8)
+                    image = (image / 127.5 - 1.0).astype(np.float32)
+                    msk = np.ones((size, size), dtype=np.float32)
+                    self.data.append((image, msk, cls_key))
+            print(f'[BgOnly] {n_anomaly} anomaly background crops + '
+                  f'{len(self.data) - n_anomaly} normal samples')
 
         self.num_images = len(self.data)
         self._length = self.num_images
@@ -223,7 +252,7 @@ class Personalized_mvtec_encoder(Dataset):
         if per_image_tokens:
             assert self.num_images < len(per_img_token_list), f"Can't use per-image tokens when the training set contains more than {len(per_img_token_list)} tokens. To enable larger sets, add more tokens to 'per_img_token_list'."
 
-        if set == "train":
+        if set in ("train", "bg_only"):
             self._length = self.num_images * repeats
         else:
             self._length = 4
@@ -279,13 +308,11 @@ class Personalized_mvtec_mask(Dataset):
         self.data_root = mvtec_path
         self.img_path=os.path.join(self.data_root,sample_name,'test',anomaly_name)
         self.mask_path=os.path.join(self.data_root,sample_name,'ground_truth',anomaly_name)
-        img_files=os.listdir(self.img_path)
-        mask_files=os.listdir(self.mask_path)
-        img_files.sort(key=lambda x:int(x[:3]))
-        mask_files.sort(key=lambda x: int(x[:3]))
+        img_files, mask_files = pair_image_mask_files(
+            self.img_path, self.mask_path)
         l=len(mask_files)//3
-        self.img_files=[os.path.join(self.img_path,file_name) for file_name in img_files[:l]]
-        self.mask_files=[os.path.join(self.mask_path,file_name) for file_name in mask_files[:l]]
+        self.img_files=img_files[:l]
+        self.mask_files=mask_files[:l]
         self.num_images = len(self.img_files)
         self._length = len(mask_files)
 
@@ -365,12 +392,10 @@ class Positive_sample_with_generated_mask(Dataset):
         self.mask_root='./generated_mask'
         self.img_path=os.path.join(self.data_root,sample_name,'train','good')
         self.mask_path=os.path.join(self.mask_root,sample_name,anomaly_name)
-        img_files=os.listdir(self.img_path)
-        mask_files=os.listdir(self.mask_path)
-        # img_files.sort(key=lambda x:int(x[:3]))
-        # mask_files.sort(key=lambda x: int(x[:3]))
-        self.img_files=[os.path.join(self.img_path,file_name) for file_name in img_files]
-        self.mask_files=[os.path.join(self.mask_path,file_name) for file_name in mask_files]
+        img_files=list_image_files(self.img_path)
+        mask_files=list_image_files(self.mask_path)
+        self.img_files=img_files
+        self.mask_files=mask_files
         self.num_images = len(self.mask_files)
         self._length = self.num_images
 
@@ -434,13 +459,11 @@ class Positive_sample_with_generated_mask(Dataset):
         # mask = self.flip(mask)
         image = np.array(image).astype(np.uint8)
         if self.random_mask:
-            mask=generate_mask(self.size).numpy().astype(np.float32)*255
+            mask = generate_mask(self.size).numpy().astype(np.float32) * 255
         else:
-            mask = np.array(mask).astype(np.float32)
+            mask = np.array(mask)
         example["image"] = (image / 127.5 - 1.0).astype(np.float32)
-        mask = mask / 255.0
-        mask[mask < 0.5] = 0
-        mask[mask >= 0.5] = 1
+        mask = normalize_gt_mask_array(mask)
         example["mask"] = mask
         example["name"]=self.name
         return example

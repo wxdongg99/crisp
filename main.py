@@ -73,6 +73,9 @@ def get_parser(**parser_kwargs):
         help="whether use ht encoder",
     )
     parser.add_argument(
+        "--override_max_steps", type=int, default=0,
+        help="Override trainer.max_steps when > 0.")
+    parser.add_argument(
         "--attention_mask",
         action="store_true", default=False,
         help="whether use ht encoder",
@@ -104,6 +107,45 @@ def get_parser(**parser_kwargs):
         action="store_true",default=False,
         help="whether use ht encoder",
     )
+    parser.add_argument(
+        "--stage", type=str, default="single",
+        choices=["single", "0", "A", "B"],
+        help="'single' = original AnomalyDiffusion single-stage training; "
+             "'0'/'A'/'B' = CRISP BPRC Stage-0/Stage-A/Stage-B.")
+    parser.add_argument(
+        "--stage_a_ckpt_root", type=str, default="",
+        help="Stage-A run root containing checkpoints/embeddings.pt and "
+             "checkpoints/spatial_encoder.pt (required for --stage B).")
+    parser.add_argument(
+        "--stage_b_init_from", type=str, default="random",
+        choices=["random", "stage_a"],
+        help="Initialize Stage-B residual embedding manager randomly or from "
+             "the Stage-A checkpoint.")
+    parser.add_argument(
+        "--bprc_alpha", type=float, default=1.0,
+        help="BPRC residual gain alpha in eps = eps_A + alpha*eps_R.")
+    parser.add_argument(
+        "--stage_a_freeze_class_ti", type=int, default=0,
+        help="Stage A: freeze the class TI bank.")
+    parser.add_argument(
+        "--stage_a_freeze_psp", type=int, default=0,
+        help="Stage A: freeze the PSP spatial encoder.")
+    parser.add_argument(
+        "--mask_pool_type", type=str, default="tbf",
+        choices=["bilinear", "tbf"],
+        help="Training mask-to-latent projection; default tbf = LFP.")
+    parser.add_argument(
+        "--bg_token_enable", type=int, default=0,
+        help="Enable per-class K-token background bank.")
+    parser.add_argument(
+        "--bg_token_k", type=int, default=4,
+        help="Number of bg tokens per class (default 4).")
+    parser.add_argument(
+        "--bg_token_freeze", type=int, default=0,
+        help="Freeze bg tokens (used when loading Stage-0 into later stages).")
+    parser.add_argument(
+        "--bg_token_ckpt", type=str, default="",
+        help="Stage-0 embeddings.pt to load bg_token weights from.")
     parser.add_argument(
         "-n",
         "--name",
@@ -648,6 +690,75 @@ if __name__ == "__main__":
             model.prepare_spatial_encoder(optimze_together=True,data_enhance=opt.data_enhance)
         elif opt.spatial_encoder:
             model.prepare_spatial_encoder()
+
+        stage = str(getattr(opt, 'stage', 'single'))
+        if int(getattr(opt, 'bg_token_enable', 0)) and \
+                model.embedding_manager is not None:
+            em = model.embedding_manager
+            em.training_stage = stage
+            em.prepare_bg_token_embeddings(
+                k_bg=int(getattr(opt, 'bg_token_k', 4)),
+                init_word='background')
+            bg_ckpt = str(getattr(opt, 'bg_token_ckpt', '') or '')
+            if bg_ckpt and os.path.isfile(bg_ckpt):
+                ckpt = torch.load(bg_ckpt, map_location='cpu',
+                                  weights_only=False)
+                loaded = 0
+                for k, v in ckpt.get('bg_token_embeddings', {}).items():
+                    if k in em.bg_token_embeddings:
+                        cur = em.bg_token_embeddings[k]
+                        cur.data.copy_(v.to(device=cur.device, dtype=cur.dtype))
+                        loaded += 1
+                print(f'[BgTokenTI] loaded {loaded}/'
+                      f'{len(ckpt.get("bg_token_embeddings", {}))} '
+                      f'from {bg_ckpt}')
+        if stage == '0':
+            model.training_stage = '0'
+            em = model.embedding_manager
+            em.training_stage = '0'
+            for p in em.string_to_param_dict.parameters():
+                p.requires_grad_(False)
+            if getattr(em, 'spatial_encoder_model', None) is not None:
+                for p in em.spatial_encoder_model.parameters():
+                    p.requires_grad_(False)
+            for p in em.bg_token_embeddings.parameters():
+                p.requires_grad_(True)
+            em.bg_token_frozen = False
+            print('[Stage-0] bg-token training: class TI frozen, '
+                  'PSP frozen, bg tokens trainable')
+        if stage == 'A':
+            if not int(getattr(opt, 'bg_token_enable', 0)):
+                raise ValueError(
+                    "--stage A requires --bg_token_enable 1 and a Stage-0 "
+                    "--bg_token_ckpt; Stage-A principal uses frozen bg tokens")
+            model.training_stage = 'A'
+            em = model.embedding_manager
+            em.training_stage = 'A'
+            em.freeze_bg_token_embeddings(True)
+            for p in em.string_to_param_dict.parameters():
+                p.requires_grad_(
+                    not bool(int(opt.stage_a_freeze_class_ti)))
+            if getattr(em, 'spatial_encoder_model', None) is not None:
+                for p in em.spatial_encoder_model.parameters():
+                    p.requires_grad_(
+                        not bool(int(opt.stage_a_freeze_psp)))
+            print('[Stage-A] bg tokens frozen; '
+                  f"class TI trainable={not bool(opt.stage_a_freeze_class_ti)}, "
+                  f"PSP trainable={not bool(opt.stage_a_freeze_psp)}")
+        if stage == 'B':
+            if not str(getattr(opt, 'stage_a_ckpt_root', '') or ''):
+                raise ValueError(
+                    "--stage B requires --stage_a_ckpt_root pointing to a "
+                    "trained Stage-A run")
+            model.enable_stage_b_residual(
+                stage_a_ckpt_root=str(opt.stage_a_ckpt_root),
+                init_from=str(getattr(opt, 'stage_b_init_from', 'random')),
+                alpha=float(getattr(opt, 'bprc_alpha', 1.0)))
+        # Training mask projection (LFP by default).
+        model.mask_pool_type = str(getattr(opt, 'mask_pool_type', 'tbf'))
+        if int(getattr(opt, 'bg_token_freeze', 0)) and \
+                model.embedding_manager is not None:
+            model.embedding_manager.freeze_bg_token_embeddings(True)
         if opt.test_dataset:
             model.prepare_test_dataset(opt.sample_name,opt.anomaly_name)
         if opt.attention_mask:
@@ -781,6 +892,9 @@ if __name__ == "__main__":
 
         trainer_kwargs["callbacks"] = [instantiate_from_config(callbacks_cfg[k]) for k in callbacks_cfg]
         trainer_kwargs["max_steps"] = trainer_opt.max_steps
+        if int(getattr(opt, 'override_max_steps', 0)) > 0:
+            trainer_kwargs["max_steps"] = int(opt.override_max_steps)
+            print(f'Override max_steps to {trainer_kwargs["max_steps"]}')
         trainer = Trainer.from_argparse_args(trainer_opt, **trainer_kwargs)
         trainer.logdir = logdir  ###
         if opt.spatial_encoder_embedding:
@@ -808,6 +922,15 @@ if __name__ == "__main__":
         else:
             config.data.params.train.params.data_root = opt.data_root+'/train'
             config.data.params.validation.params.data_root = opt.data_root+'/test'
+        # Stage-0: only background supervision (normal + inverted anomaly mask)
+        if str(getattr(opt, 'stage', '')) == '0':
+            if not opt.spatial_encoder_embedding:
+                raise ValueError(
+                    "--stage 0 requires --spatial_encoder_embedding so the "
+                    "mask-encoder dataset is selected")
+            config.data.params.train.params.set = 'bg_only'
+            config.data.params.validation.params.set = 'validate'
+            print('[Stage-0] dataset set=bg_only')
         #data = instantiate_from_config(config.data)
 
         data = instantiate_from_config(config.data)
