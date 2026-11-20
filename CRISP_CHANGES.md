@@ -1,7 +1,7 @@
 # CRISP additions in `new_crisp`
 
 **Repo**: `https://github.com/sjtuplayer/anomalydiffusion`  
-**Local path**: `/home/cc/Documents/anomalydiffusion/new_crisp`  
+**Local path**: `/media/cc/U2-Server/crisp-storage/new_crisp`  
 **Base commit**: `b85297f Update IC-LPIPS`  
 **Last update**: 2026-11-19
 
@@ -268,7 +268,7 @@ https://github.com/sjtuplayer/anomalydiffusion
 To review:
 
 ```bash
-cd /home/cc/Documents/anomalydiffusion/new_crisp
+cd /media/cc/U2-Server/crisp-storage/new_crisp
 git diff --stat
 git status
 ```
