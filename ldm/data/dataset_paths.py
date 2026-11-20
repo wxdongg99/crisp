@@ -24,9 +24,9 @@ def sort_key_by_numeric_prefix(filename: str):
     """Numeric-aware key: ``2.png`` sorts before ``10.png``."""
     stem = os.path.splitext(os.path.basename(filename))[0]
     try:
-        return int(stem)
+        return (0, int(stem))
     except ValueError:
-        return stem
+        return (1, stem)
 
 
 def parse_name_anomaly_file(path: str):
