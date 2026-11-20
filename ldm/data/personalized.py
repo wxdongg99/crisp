@@ -19,6 +19,7 @@ def _pil_resample(name):
 
 from .dataset_paths import (
     list_image_files,
+    list_image_files_recursive,
     normalize_gt_mask_array,
     pair_image_mask_files,
     parse_name_anomaly_file,
@@ -402,7 +403,14 @@ class Positive_sample_with_generated_mask(Dataset):
         self.img_path=os.path.join(self.data_root,sample_name,'train','good')
         self.mask_path=os.path.join(self.mask_root,sample_name,anomaly_name)
         img_files=list_image_files(self.img_path)
-        mask_files=list_image_files(self.mask_path)
+        if img_files:
+            img_files=[os.path.join(self.img_path, f) for f in img_files]
+        else:
+            img_files=list_image_files_recursive(self.img_path)
+        mask_files=[
+            os.path.join(self.mask_path, f)
+            for f in list_image_files(self.mask_path)
+        ]
         self.img_files=img_files
         self.mask_files=mask_files
         self.num_images = len(self.mask_files)
@@ -451,7 +459,9 @@ class Positive_sample_with_generated_mask(Dataset):
         example["caption"] = text
         idx = i % self.num_images
         source_filename = self.mask_files[idx]
-        target_filename = self.img_files[random.randint(0,len(self.img_files)-1)]
+        # Uniformly cycle through normal base images instead of sampling with
+        # replacement (each base image is used equally often).
+        target_filename = self.img_files[idx % len(self.img_files)]
         image = Image.open(target_filename)
         mask = Image.open(source_filename).convert("L")
         if not image.mode == "RGB":

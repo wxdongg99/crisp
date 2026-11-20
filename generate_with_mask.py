@@ -118,6 +118,12 @@ if __name__ == "__main__":
         help="Disable CRISP's >20% large-mask bilinear fallback and force "
              "LFP (tbf) projection even for large masks.",
     )
+    parser.add_argument(
+        "--num_images", type=int, default=500,
+        help="Number of images to generate (default 500).")
+    parser.add_argument(
+        "--batch_size", type=int, default=8,
+        help="Generation batch size (default 8).")
     # setup_seed(42)
     opt = parser.parse_args()
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune-encoder+embedding.yaml")
@@ -135,7 +141,7 @@ if __name__ == "__main__":
     model.embedding_manager.load('logs/anomaly-checkpoints/checkpoints/embeddings.pt')
     dataset = Positive_sample_with_generated_mask(opt.data_root,sample_name, anomaly_name, repeats=1, size=256, set='train',
                                                       per_image_tokens=False)
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=False, drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False, drop_last=True)
     save_dir = 'generated_dataset/%s/%s' % (sample_name, anomaly_name)
     os.makedirs(save_dir,exist_ok=True)
     os.makedirs(os.path.join(save_dir,'image'), exist_ok=True)
@@ -147,7 +153,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         for epoch in range(1000):
             for idx, batch in enumerate(dataloader):
-                if cnt>500:
+                if cnt >= opt.num_images:
                     exit()
                 with model.ema_scope():
                     mask=batch['mask'].cpu()

@@ -57,6 +57,19 @@ def list_image_files(dir_path: str):
     return files
 
 
+def list_image_files_recursive(dir_path: str):
+    """Return image paths recursively (e.g. train/good/all/*.jpg)."""
+    if not os.path.isdir(dir_path):
+        raise FileNotFoundError(f'image directory not found: {dir_path}')
+    files = []
+    for root, _, names in os.walk(dir_path):
+        for name in names:
+            if name.lower().endswith(_IMG_EXTS):
+                files.append(os.path.join(root, name))
+    files.sort(key=lambda p: (sort_key_by_numeric_prefix(os.path.basename(p)), p))
+    return files
+
+
 def pair_image_mask_files(img_dir: str, mask_dir: str):
     """Pair images and masks by stem, never by independent list index.
 

@@ -247,8 +247,14 @@ class EmbeddingManager(nn.Module):
         if k_bg <= 0:
             raise ValueError(f"bg_token_k must be > 0, got {k_bg}")
         token = self._get_token_for_string(init_word)
+        # The embedding bank may already be on CUDA (notably when loading a
+        # checkpoint during generation); keep the token on the same device.
+        try:
+            _dev = next(self.string_to_param_dict.parameters()).device
+        except StopIteration:
+            _dev = torch.device("cpu")
         with torch.no_grad():
-            init = self._get_embedding_for_tkn(token.cpu())
+            init = self._get_embedding_for_tkn(token.to(_dev))
         names = class_names or list(self.string_to_param_dict.keys())
         for name in names:
             if name in self.bg_token_embeddings:
