@@ -129,6 +129,10 @@ if __name__ == "__main__":
         choices=["rotate", "random"],
         help="Normal base-image selection: uniform rotation (default) or "
              "random sampling with replacement.")
+    parser.add_argument(
+        "--use_best", action="store_true", default=False,
+        help="Load Stage-A *_best.pt checkpoints instead of final "
+             "embeddings.pt/spatial_encoder.pt.")
     # setup_seed(42)
     opt = parser.parse_args()
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune-encoder+embedding.yaml")
@@ -141,9 +145,17 @@ if __name__ == "__main__":
     model = model.to(device)
     sampler = DDIMSampler(model)
     model.prepare_spatial_encoder(optimze_together=True)
-    ckpt = torch.load('logs/anomaly-checkpoints/checkpoints/spatial_encoder.pt')
+    _ckpt_dir = 'logs/anomaly-checkpoints/checkpoints'
+    _sub = '_best' if opt.use_best else ''
+    _sp_path = f'{_ckpt_dir}/spatial_encoder{_sub}.pt'
+    _em_path = f'{_ckpt_dir}/embeddings{_sub}.pt'
+    if opt.use_best and (not os.path.isfile(_sp_path) or not os.path.isfile(_em_path)):
+        print('[Warning] *_best.pt missing; falling back to final checkpoints')
+        _sp_path = f'{_ckpt_dir}/spatial_encoder.pt'
+        _em_path = f'{_ckpt_dir}/embeddings.pt'
+    ckpt = torch.load(_sp_path)
     model.embedding_manager.spatial_encoder_model.load_state_dict(ckpt)
-    model.embedding_manager.load('logs/anomaly-checkpoints/checkpoints/embeddings.pt')
+    model.embedding_manager.load(_em_path)
     dataset = Positive_sample_with_generated_mask(
         opt.data_root, sample_name, anomaly_name, repeats=1, size=256,
         set='train', per_image_tokens=False,
