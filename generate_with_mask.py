@@ -124,6 +124,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size", type=int, default=8,
         help="Generation batch size (default 8).")
+    parser.add_argument(
+        "--base_image_mode", type=str, default="rotate",
+        choices=["rotate", "random"],
+        help="Normal base-image selection: uniform rotation (default) or "
+             "random sampling with replacement.")
     # setup_seed(42)
     opt = parser.parse_args()
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune-encoder+embedding.yaml")
@@ -139,8 +144,10 @@ if __name__ == "__main__":
     ckpt = torch.load('logs/anomaly-checkpoints/checkpoints/spatial_encoder.pt')
     model.embedding_manager.spatial_encoder_model.load_state_dict(ckpt)
     model.embedding_manager.load('logs/anomaly-checkpoints/checkpoints/embeddings.pt')
-    dataset = Positive_sample_with_generated_mask(opt.data_root,sample_name, anomaly_name, repeats=1, size=256, set='train',
-                                                      per_image_tokens=False)
+    dataset = Positive_sample_with_generated_mask(
+        opt.data_root, sample_name, anomaly_name, repeats=1, size=256,
+        set='train', per_image_tokens=False,
+        base_image_mode=opt.base_image_mode)
     dataloader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False, drop_last=True)
     save_dir = 'generated_dataset/%s/%s' % (sample_name, anomaly_name)
     os.makedirs(save_dir,exist_ok=True)

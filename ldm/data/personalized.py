@@ -395,8 +395,14 @@ class Positive_sample_with_generated_mask(Dataset):
                  mixing_prob=0.25,
                  coarse_class_text=None,
                  random_mask=False,
+                 base_image_mode="rotate",
                  **kwargs
                  ):
+        if base_image_mode not in ("rotate", "random"):
+            raise ValueError(
+                f"base_image_mode must be 'rotate' or 'random', "
+                f"got {base_image_mode!r}")
+        self.base_image_mode = base_image_mode
         self.name=sample_name + '+' + anomaly_name
         self.data_root = mvtec_path
         self.mask_root='./generated_mask'
@@ -459,9 +465,12 @@ class Positive_sample_with_generated_mask(Dataset):
         example["caption"] = text
         idx = i % self.num_images
         source_filename = self.mask_files[idx]
-        # Uniformly cycle through normal base images instead of sampling with
-        # replacement (each base image is used equally often).
-        target_filename = self.img_files[idx % len(self.img_files)]
+        if self.base_image_mode == "random":
+            target_filename = self.img_files[
+                random.randint(0, len(self.img_files) - 1)]
+        else:
+            # Uniformly cycle through normal base images (default).
+            target_filename = self.img_files[idx % len(self.img_files)]
         image = Image.open(target_filename)
         mask = Image.open(source_filename).convert("L")
         if not image.mode == "RGB":
