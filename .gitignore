@@ -1,7 +1,7 @@
 __pycache__/
 *.py[cod]
-generated_dataset/
-models/
-logs/
-generated_mask/
-bert-base-uncased
+/generated_dataset/
+/models/
+/logs/
+/generated_mask/
+/bert-base-uncased
