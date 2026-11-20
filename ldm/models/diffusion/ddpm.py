@@ -1023,7 +1023,7 @@ class LatentDiffusion(DDPM):
             return self.first_stage_model.encode(x)
 
     def enable_stage_b_residual(self, stage_a_ckpt_root, init_from="random",
-                                alpha=1.0, use_best=False):
+                                alpha=1.0):
         """Enable CRISP Stage-B residual (BPRC) training.
 
         Frozen Stage-A principal is loaded into a separate embedding manager;
@@ -1032,13 +1032,8 @@ class LatentDiffusion(DDPM):
         ckpt_dir = os.path.join(stage_a_ckpt_root, "checkpoints")
         if not os.path.isdir(ckpt_dir):
             ckpt_dir = stage_a_ckpt_root
-        sub = "_best" if use_best else ""
-        embed_path = os.path.join(ckpt_dir, f"embeddings{sub}.pt")
-        spatial_path = os.path.join(ckpt_dir, f"spatial_encoder{sub}.pt")
-        if use_best and not os.path.isfile(embed_path):
-            print("[Stage-B] *_best.pt missing; falling back to final")
-            embed_path = os.path.join(ckpt_dir, "embeddings.pt")
-            spatial_path = os.path.join(ckpt_dir, "spatial_encoder.pt")
+        embed_path = os.path.join(ckpt_dir, "embeddings.pt")
+        spatial_path = os.path.join(ckpt_dir, "spatial_encoder.pt")
         if not os.path.isfile(embed_path):
             raise FileNotFoundError(
                 f"Stage-A embeddings not found: {embed_path}")
