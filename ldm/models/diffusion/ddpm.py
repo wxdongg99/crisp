@@ -508,8 +508,9 @@ class LatentDiffusion(DDPM):
         
         self.embedding_manager = self.instantiate_embedding_manager(personalization_config, self.cond_stage_model)
         self.resize256=transforms.Resize((256,256))
-        for param in self.embedding_manager.embedding_parameters():
-            param.requires_grad = True
+        if self.embedding_manager is not None:
+            for param in self.embedding_manager.embedding_parameters():
+                param.requires_grad = True
     def prepare_spatial_encoder(self,optimze_together=False,data_enhance=False,l=4):
         if optimze_together:
             self.spatial_encoder_and_embedding=True
@@ -584,6 +585,8 @@ class LatentDiffusion(DDPM):
             
     
     def instantiate_embedding_manager(self, config, embedder):
+        if config is None:
+            return None
         model = instantiate_from_config(config, embedder=embedder)
 
         if config.params.get("embedding_manager_ckpt", None): # do not load if missing OR empty string
@@ -1753,8 +1756,9 @@ class LatentDiffusion(DDPM):
         for param in self.model.parameters():
             param.requires_grad = False
 
-        for param in self.embedding_manager.embedding_parameters():
-            param.requires_grad = True
+        if self.embedding_manager is not None:
+            for param in self.embedding_manager.embedding_parameters():
+                param.requires_grad = True
 
         lr = self.learning_rate
         params = list(self.embedding_manager.embedding_parameters())
@@ -1768,8 +1772,9 @@ class LatentDiffusion(DDPM):
         for param in self.model.parameters():
             param.requires_grad = True
 
-        for param in self.embedding_manager.embedding_parameters():
-            param.requires_grad = True
+        if self.embedding_manager is not None:
+            for param in self.embedding_manager.embedding_parameters():
+                param.requires_grad = True
 
         model_params = list(self.cond_stage_model.parameters()) + list(self.model.parameters())
         embedding_params = list(self.embedding_manager.embedding_parameters())
