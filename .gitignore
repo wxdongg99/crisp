@@ -5,3 +5,5 @@ __pycache__/
 /logs/
 /generated_mask/
 /bert-base-uncased
+
+/highres_runs/

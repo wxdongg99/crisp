@@ -1,0 +1,6 @@
+diffusers>=0.31
+transformers>=4.43
+accelerate>=0.34
+sentencepiece
+protobuf
+Pillow
