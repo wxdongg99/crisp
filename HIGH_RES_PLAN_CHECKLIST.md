@@ -24,7 +24,7 @@ Status legend: `[ ]` todo, `[~]` in progress, `[x]` done.
 ## P2. Token-level textual inversion
 
 - [ ] Keep `tools/textual_inversion_basic.py` as soft-prompt control
-- [ ] Add `tools/textual_inversion_token.py` for LDM placeholder-token TI
+- [x] Add `tools/textual_inversion_token.py` for LDM placeholder-token TI (smoke/trained)
 - [ ] Add `highres/textual_inversion_sdxl.py` (dual CLIP, separate token banks)
 - [ ] Add `highres/textual_inversion_pixart.py` (T5 input embedding, attention mask)
 - [ ] Add `highres/token_embedding.py` only if shared logic is real

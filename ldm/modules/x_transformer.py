@@ -605,11 +605,12 @@ class TransformerWrapper(nn.Module):
             return_attn=False,
             mems=None,
             embedding_manager=None,
+            input_embeddings=None,
             **kwargs
     ):
         b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
 
-        embedded_x = self.token_emb(x)
+        embedded_x = input_embeddings if input_embeddings is not None else self.token_emb(x)
         position = None
 
         if embedding_manager:
