@@ -21,14 +21,36 @@ from torchvision import transforms
 from torchvision.utils import save_image
 
 
-def load_image(path, size, device):
-    tf = transforms.Compose([
+def load_targets(paths, size, crops_per_image, device):
+    """Build deterministic full/center/offset crops for multi-image TI."""
+    to_t = transforms.Compose([
         transforms.Resize(size, interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.CenterCrop(size),
         transforms.ToTensor(),
         transforms.Normalize([0.5] * 3, [0.5] * 3),
     ])
-    return tf(Image.open(path).convert("RGB")).unsqueeze(0).to(device)
+    out = []
+    for path in paths:
+        img = Image.open(path).convert("RGB")
+        w, h = img.size
+        for c in range(crops_per_image):
+            if c == 0:
+                crop = img
+            else:
+                # deterministic zoom/crop variants: center, top-left, bottom-right, ...
+                frac = 0.65 if c % 2 else 0.8
+                cw, ch = int(w * frac), int(h * frac)
+                if c % 4 == 1:
+                    x0, y0 = 0, 0
+                elif c % 4 == 2:
+                    x0, y0 = w - cw, h - ch
+                elif c % 4 == 3:
+                    x0, y0 = w - cw, 0
+                else:
+                    x0, y0 = 0, h - ch
+                crop = img.crop((x0, y0, x0 + cw, y0 + ch))
+            out.append(to_t(crop).unsqueeze(0).to(device))
+    return out
 
 
 def _encode_with_token(text_encoder, ids, token_id, vec):
@@ -65,9 +87,12 @@ def get_prompt_embeds(text_encoder, text_encoder_2, tokenizer, tokenizer_2, prom
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--model", default="/media/cc/U2-Server/crisp-storage/models/sdxl-base-1.0")
-    p.add_argument("--image", required=True)
+    p.add_argument("--image", required=True, nargs="+")
+    p.add_argument("--crops-per-image", type=int, default=4)
+    p.add_argument("--ema-decay", type=float, default=0.999)
     p.add_argument("--prompt", default="a photo of <anomaly>")
     p.add_argument("--placeholder", default="<anomaly>")
+    p.add_argument("--init-word", default="fabric")
     p.add_argument("--steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--size", type=int, default=1024)
@@ -106,19 +131,32 @@ def main():
     token_id_2 = tokenizer_2.convert_tokens_to_ids(args.placeholder)
     emb1 = text_encoder.get_input_embeddings()
     emb2 = text_encoder_2.get_input_embeddings()
+    # Initialize the new token from a semantically meaningful word rather than
+    # the random resize_token_embeddings row.
+    init_ids = tokenizer(args.init_word, add_special_tokens=False).input_ids
+    init_ids2 = tokenizer_2(args.init_word, add_special_tokens=False).input_ids
+    init_id = init_ids[0] if init_ids else token_id
+    init_id2 = init_ids2[0] if init_ids2 else token_id_2
+    with torch.no_grad():
+        emb1.weight[token_id].copy_(emb1.weight[init_id])
+        emb2.weight[token_id_2].copy_(emb2.weight[init_id2])
     vec1 = torch.nn.Parameter(emb1.weight[token_id].detach().float().clone())
     vec2 = torch.nn.Parameter(emb2.weight[token_id_2].detach().float().clone())
 
-    image = load_image(args.image, args.size, args.device).to(text_encoder.dtype)
+    targets = load_targets(args.image, args.size, args.crops_per_image, args.device)
     with torch.no_grad():
-        latents = vae.encode(image).latent_dist.sample() * vae.config.scaling_factor
+        latents_list = [vae.encode(t.to(dtype)).latent_dist.sample() * vae.config.scaling_factor for t in targets]
+    print(f"[TI-SDXL] targets={len(latents_list)} from {len(args.image)} image(s)")
     add_time_ids = torch.tensor([[args.size, args.size, 0, 0, args.size, args.size]],
                                 device=args.device, dtype=dtype)
     opt = torch.optim.AdamW([vec1, vec2], lr=args.lr, betas=(0.9, 0.999), weight_decay=0.0)
+    ema1 = vec1.detach().clone()
+    ema2 = vec2.detach().clone()
     for step in range(1, args.steps + 1):
         prompt_embeds, pooled = get_prompt_embeds(text_encoder, text_encoder_2, tokenizer, tokenizer_2,
                                                   args.prompt, token_id, token_id_2,
                                                   vec1.to(dtype), vec2.to(dtype), args.device)
+        latents = latents_list[(step - 1) % len(latents_list)]
         noise = torch.randn_like(latents)
         timesteps = torch.randint(0, scheduler.config.num_train_timesteps, (latents.shape[0],),
                                   device=args.device).long()
@@ -129,15 +167,23 @@ def main():
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
+        with torch.no_grad():
+            ema1.mul_(args.ema_decay).add_(vec1.detach(), alpha=1.0 - args.ema_decay)
+            ema2.mul_(args.ema_decay).add_(vec2.detach(), alpha=1.0 - args.ema_decay)
         if step == 1 or step % 20 == 0 or step == args.steps:
             print(f"[TI-SDXL] step={step:4d} loss={loss.item():.6f}")
 
     torch.save({"vec1": vec1.detach().cpu(), "vec2": vec2.detach().cpu(),
                 "prompt": args.prompt, "placeholder": args.placeholder,
                 "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding.pt")
+    torch.save({"vec1": ema1.cpu(), "vec2": ema2.cpu(),
+                "prompt": args.prompt, "placeholder": args.placeholder,
+                "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding_ema.pt")
     (out / "manifest.json").write_text(json.dumps({
         "prompt": args.prompt, "placeholder": args.placeholder, "steps": args.steps,
-        "lr": args.lr, "image": args.image, "seed": args.seed, "size": args.size,
+        "lr": args.lr, "images": args.image, "crops_per_image": args.crops_per_image,
+        "ema_decay": args.ema_decay, "seed": args.seed, "size": args.size,
+        "targets": len(latents_list),
         "note": "only placeholder rows in both SDXL text encoders are trainable",
     }, indent=2))
     print(f"[TI-SDXL] wrote {out}")

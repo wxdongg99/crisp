@@ -220,3 +220,43 @@ Created a clean, independent environment without system-site-packages:
 The older `highres_venv` was deleted/deprecated because it inherited packages
 from the AnomalyDiffusion environment. The clean env has its own torch,
 diffusers, transformers, accelerate and kornia installation.
+
+## 2026-11-22 multi-image SDXL TI
+
+`highres/textual_inversion_sdxl.py` now supports:
+
+- `--image` with multiple paths;
+- `--crops-per-image` deterministic full/center/offset crops;
+- `--ema-decay`;
+- `--init-word` to initialize the new token from a semantic word.
+
+Run:
+
+```text
+4 fabric images × 4 crops, 200 steps, EMA=0.999
+/media/cc/U2-Server/crisp-storage/textual_inversion_runs/sdxl_token_multi2_200
+```
+
+Outputs include raw and EMA token checkpoints. Generated 1024 samples now show
+coherent fabric texture; the learned token still represents texture rather than
+a specific anomaly.
+
+Comparison:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_token/multi2_ti_comparison.jpg
+```
+
+## 2026-11-22 PixArt mask implementation attempt
+
+`highres/pixart_mask.py` implements sampler-level mask background preservation:
+
+- source VAE latent;
+- mask resized to latent;
+- each denoise step blends mask-outside with source latent noised to next timestep;
+- optional learned PixArt T5 token via embedding hook.
+
+Local 512/1024 attempts hit CUDA OOM despite T5 CPU offload; the PixArt
+transformer/attention path exceeds the available local GPU memory headroom.
+The implementation is kept for the next A100/clean-GPU run; it is not yet
+validated on an image.
