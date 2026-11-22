@@ -114,3 +114,36 @@ Comparison image:
 - 2K transformer: HuggingFace mirror
   `PixArt-alpha/PixArt-Sigma-XL-2-2K-MS` (aria2c, 4 connections)
 - ModelScope does not currently expose the official Sigma 2K transformer repo.
+
+## 2026-11-22 improved fabric prompt
+
+Prompt used for the comparison:
+
+```text
+A realistic macro photograph of natural beige linen fabric, individual woven threads clearly visible, soft neutral studio lighting, shallow depth of field, high detail, photorealistic texture, no text, no logos
+```
+
+Negative prompt:
+
+```text
+abstract pattern, red fabric, geometric stripes, blurry, low resolution, jpeg artifacts, painting, illustration, text, watermark
+```
+
+Runs:
+
+| run | model | resolution | result |
+|---|---|---:|---|
+| `goodprompt_1024w_1024` | 1024 weights | 1024 | coherent linen macro |
+| `goodprompt_1024w_2048` | 1024 weights | 2048 | blurry/low-detail |
+| `goodprompt_2k_2048` | official 2K weights | 2048 | best texture/detail |
+
+Comparison:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/pixart_sigma/goodprompt_comparison.jpg
+```
+
+Conclusion: the earlier "wrong-looking" results were largely a weak/generic
+prompt plus using 1024 weights at 2048. With a concrete photographic prompt,
+both models produce plausible fabric; official 2K weights are clearly better
+at native 2048.
