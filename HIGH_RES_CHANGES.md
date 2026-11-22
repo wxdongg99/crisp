@@ -47,7 +47,7 @@ Source split:
 Environment:
 
 ```text
-/media/cc/U2-Server/crisp-storage/envs/highres_venv
+/media/cc/U2-Server/crisp-storage/envs/highres_py38
 ```
 
 Required compatibility fix: `kornia>=0.7.3` (old 0.6.0 lacks
@@ -208,3 +208,15 @@ Smoke:
 
 Result: coherent 1024² linen macro at ~13.5 s with CPU offload, peak ~5.4 GB
 allocated. This is the baseline for the next token-level TI work.
+
+## 2026-11-22 clean environment
+
+Created a clean, independent environment without system-site-packages:
+
+```text
+/media/cc/U2-Server/crisp-storage/envs/highres_py38
+```
+
+The older `highres_venv` was deleted/deprecated because it inherited packages
+from the AnomalyDiffusion environment. The clean env has its own torch,
+diffusers, transformers, accelerate and kornia installation.

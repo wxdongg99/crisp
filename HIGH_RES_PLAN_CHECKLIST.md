@@ -5,7 +5,7 @@ Status legend: `[ ]` todo, `[~]` in progress, `[x]` done.
 
 ## P0. Evidence and environment
 
-- [x] Use isolated env `/media/cc/U2-Server/crisp-storage/envs/highres_venv`
+- [x] Use isolated env `/media/cc/U2-Server/crisp-storage/envs/highres_py38`
 - [x] Record model split: ModelScope T5/VAE + HF mirror transformer
 - [ ] Record exact git SHA, dependency versions, component hashes in a run manifest
 - [ ] Build a non-system-site-packages env for final reproducibility
