@@ -50,6 +50,7 @@ def main():
     p.add_argument("--run_name", default="")
     p.add_argument("--enable_cpu_offload", action="store_true")
     p.add_argument("--enable_attention_slicing", action="store_true")
+    p.add_argument("--enable_sequential_offload", action="store_true")
     args = p.parse_args()
 
     from diffusers import PixArtSigmaPipeline
@@ -81,11 +82,13 @@ def main():
                 o[0, idx] = vec.to(o.dtype)
             return o
         hooks.append(pipe.text_encoder.encoder.embed_tokens.register_forward_hook(hook, with_kwargs=True))
-    # Keep T5 on CPU (it is only used once), put only transformer/VAE on GPU.
-    # This avoids holding the full T5 stack in VRAM during the manual loop.
-    pipe.text_encoder.to("cpu").to(torch.float32)
-    pipe.transformer.to("cuda")
-    pipe.vae.to("cuda")
+    if args.enable_sequential_offload:
+        pipe.enable_sequential_cpu_offload()
+    else:
+        # Keep T5 on CPU (it is only used once), put only transformer/VAE on GPU.
+        pipe.text_encoder.to("cpu").to(torch.float32)
+        pipe.transformer.to("cuda")
+        pipe.vae.to("cuda")
     if args.enable_attention_slicing:
         pipe.enable_attention_slicing()
     device = torch.device("cuda")
@@ -94,16 +97,21 @@ def main():
     loaded = time.time()
 
     do_cfg = args.guidance_scale > 1.0
-    prompt_embeds, prompt_attn, neg_embeds, neg_attn = pipe.encode_prompt(
-        args.prompt, do_classifier_free_guidance=do_cfg, negative_prompt=args.negative_prompt,
-        num_images_per_prompt=1, device=torch.device("cpu"), clean_caption=False)
+    with torch.no_grad():
+        prompt_embeds, prompt_attn, neg_embeds, neg_attn = pipe.encode_prompt(
+            args.prompt, do_classifier_free_guidance=do_cfg, negative_prompt=args.negative_prompt,
+            num_images_per_prompt=1, device=torch.device("cpu"), clean_caption=False)
     if do_cfg:
         prompt_embeds = torch.cat([neg_embeds, prompt_embeds], dim=0)
         prompt_attn = torch.cat([neg_attn, prompt_attn], dim=0)
     prompt_embeds = prompt_embeds.to(device, dtype)
     prompt_attn = prompt_attn.to(device)
     import gc
-    del pipe.text_encoder
+    try:
+        pipe.components.pop("text_encoder", None)
+    except Exception:
+        pass
+    pipe.text_encoder = None
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

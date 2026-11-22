@@ -260,3 +260,48 @@ Local 512/1024 attempts hit CUDA OOM despite T5 CPU offload; the PixArt
 transformer/attention path exceeds the available local GPU memory headroom.
 The implementation is kept for the next A100/clean-GPU run; it is not yet
 validated on an image.
+
+## 2026-11-22 anomaly-crop SDXL TI
+
+Created anomaly-region crops from ZJU fabric ground-truth masks:
+
+```text
+/textual_inversion_runs/anomaly_crops/
+  pattern16_001.png ... pattern16_008.png
+```
+
+Each crop is mask-bbox + 0.8×bbox margin, resized to 1024².
+
+Training:
+
+```text
+8 anomaly crops, 1 crop/image
+300 steps, lr=2e-4, EMA=0.999
+init_word=defect
+prompt="a realistic macro photograph of a fabric defect, <anomaly>, high detail"
+```
+
+Output:
+
+```text
+/textual_inversion_runs/sdxl_token_anomaly_300/
+/highres_runs/sdxl_token/anomaly_raw_1024/
+/highres_runs/sdxl_token/anomaly_ema_1024/
+/highres_runs/sdxl_token/anomaly_ti_comparison.jpg
+```
+
+Observed: raw/EMA token still generate normal fabric texture; no convincing
+defect is learned. The next TI attempt needs stronger defect prompts/crops or
+more region diversity; current evidence is negative but recorded.
+
+## 2026-11-22 PixArt mask blocker
+
+`highres/pixart_mask.py` implementation exists and supports:
+- sampler-level background preservation;
+- optional PixArt token embedding;
+- no-CFG mode;
+- CPU T5 placement.
+
+Local attempts at 512/1024 still OOM (manual PixArt transformer attention path
+peaks around 19 GB after T5 offload). Sequential CPU offload conflicts with the
+manual loop; next attempt must run on A100 or another GPU with ≥24 GB free.
