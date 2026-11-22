@@ -71,6 +71,7 @@ def main() -> None:
         dtype = torch.float32
 
     run_name = args.run_name or time.strftime("pixart_%Y%m%d_%H%M%S")
+    run_start = time.time()
     out = Path(args.output_dir) / run_name
     img_dir = out / "images"
     img_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +85,9 @@ def main() -> None:
         pipe = pipe.to(args.device)
     if args.enable_attention_slicing:
         pipe.enable_attention_slicing()
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    pipe_loaded = time.time()
 
     vae_scale_factor = int(pipe.vae_scale_factor)
     transformer_sample_size = int(pipe.transformer.config.sample_size)
@@ -96,6 +100,7 @@ def main() -> None:
 
     prompts = load_prompts(args)
     records = []
+    generation_start = time.time()
     for prompt_idx, prompt in enumerate(prompts):
         done = 0
         while done < args.num_images:
@@ -138,6 +143,7 @@ def main() -> None:
             done += n
             print(f"[PixArt-Sigma] prompt {prompt_idx + 1}/{len(prompts)}: {done}/{args.num_images}")
 
+    generation_elapsed = time.time() - generation_start
     manifest = {
         "model": args.model,
         "height": height,
@@ -152,6 +158,11 @@ def main() -> None:
         "transformer_sample_size": transformer_sample_size,
         "prompts": prompts,
         "records": records,
+        "pipeline_load_sec": round(pipe_loaded - run_start, 2),
+        "generation_elapsed_sec": round(generation_elapsed, 2),
+        "run_elapsed_sec": round(time.time() - run_start, 2),
+        "peak_vram_allocated_mb": round(torch.cuda.max_memory_allocated() / (1024 ** 2), 1) if torch.cuda.is_available() else None,
+        "peak_vram_reserved_mb": round(torch.cuda.max_memory_reserved() / (1024 ** 2), 1) if torch.cuda.is_available() else None,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"[PixArt-Sigma] wrote {len(records)} images to {out}")

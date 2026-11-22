@@ -147,3 +147,64 @@ Conclusion: the earlier "wrong-looking" results were largely a weak/generic
 prompt plus using 1024 weights at 2048. With a concrete photographic prompt,
 both models produce plausible fabric; official 2K weights are clearly better
 at native 2048.
+
+## 2026-11-22 native validation, fixed seeds, timing
+
+### Native resolution validation
+
+| run | model | request | denoise | latent | sample_size |
+|---|---|---:|---:|---:|---:|
+| `validate_native512` | 1024 weights | 512² | 512² | 64² | 128 |
+| `validate_native1024` | 1024 weights | 1024² | 1024² | 128² | 128 |
+| `fixedprompt_1024x4` | 1024 weights | 1024² | 1024² | 128² | 128 |
+| `fixedprompt_2048x4` | official 2K | 2048² | 2048² | 256² | 256 |
+
+### Fixed prompt/seed set
+
+Prompt and negative prompt are recorded in the manifests. Four images per
+resolution are under:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/pixart_sigma/
+  fixedprompt_1024x4/
+  fixedprompt_2048x4/
+  fixedprompt_comparison.jpg
+```
+
+### Timing / peak VRAM (CPU offload + attention slicing, local GPU1)
+
+| run | images | gen sec | sec/img | peak allocated MB |
+|---|---:|---:|---:|---:|
+| `validate_native512` | 1 | 12.3 | 12.3 | 11,096 |
+| `validate_native1024` | 1 | 14.3 | 14.3 | 11,096 |
+| `fixedprompt_1024x4` | 4 | 54.0 | 13.5 | 11,096 |
+| `fixedprompt_2048x4` | 4 | 158.8 | 39.7 | 11,097 |
+| SDXL `base_1024_smoke` | 1 | 13.5 | 13.5 | 5,404 |
+
+Approximate per-denoise-step:
+
+```text
+PixArt 1024: ~0.68 s/step
+PixArt 2048: ~1.99 s/step
+SDXL 1024:   ~0.68 s/step (20 steps, CPU offload)
+```
+
+## 2026-11-22 SDXL baseline started
+
+Added `highres/sdxl_generate.py`.
+
+SDXL base staged from ModelScope:
+
+```text
+AI-ModelScope/stable-diffusion-xl-base-1.0
+/media/cc/U2-Server/crisp-storage/models/sdxl-base-1.0
+```
+
+Smoke:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl/base_1024_smoke/
+```
+
+Result: coherent 1024² linen macro at ~13.5 s with CPU offload, peak ~5.4 GB
+allocated. This is the baseline for the next token-level TI work.

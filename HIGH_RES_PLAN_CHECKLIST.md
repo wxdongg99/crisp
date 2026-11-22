@@ -16,7 +16,7 @@ Status legend: `[ ]` todo, `[~]` in progress, `[x]` done.
 - [x] Set `use_resolution_binning=False` in `highres/pixart_sigma_generate.py`
 - [x] Record requested size, denoise size, latent shape, output size in manifest
 - [x] Rerun 2048 with current 1024 weights: `latent=256x256`, output 2048x2048
-- [ ] Verify 512/1024 latent sizes with binning disabled
+- [x] Verify 512/1024 latent sizes with binning disabled
 - [x] Download official 2K transformer `PixArt-alpha/PixArt-Sigma-XL-2-2K-MS`
 - [x] Run true native 2048 with official 2K weights: `latent=256x256`, `sample_size=256`
 - [~] Compare 1024-weights@2048 vs official 2K@2048 visually (first comparison done; metrics next)
@@ -35,15 +35,15 @@ Status legend: `[ ]` todo, `[~]` in progress, `[x]` done.
 
 ## P3. SDXL baseline
 
-- [ ] Download/lock SDXL base + refiner components
-- [ ] 512/1024 fixed-seed generation baseline
+- [x] Download SDXL base from ModelScope; refiner not yet
+- [x] PixArt 512/1024 fixed-seed baseline (validation runs)
 - [ ] SDXL 1024 token TI (200 -> 1000 steps)
 - [ ] SDXL 1024 -> 2048 high-res fix baseline
 - [ ] Mask probe: background preservation + mask shift + empty/full mask
 
 ## P4. PixArt baseline
 
-- [ ] 512/1024 fixed-seed generation baseline
+- [x] PixArt 512/1024 fixed-seed baseline (validation runs)
 - [ ] PixArt token TI after T5 gradient/VRAM validation
 - [ ] Native 2048 with official 2K weights
 - [ ] Mask probe: same protocol as SDXL
