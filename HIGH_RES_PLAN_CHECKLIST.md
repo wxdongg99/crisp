@@ -17,9 +17,9 @@ Status legend: `[ ]` todo, `[~]` in progress, `[x]` done.
 - [x] Record requested size, denoise size, latent shape, output size in manifest
 - [x] Rerun 2048 with current 1024 weights: `latent=256x256`, output 2048x2048
 - [ ] Verify 512/1024 latent sizes with binning disabled
-- [~] Download official 2K transformer `PixArt-alpha/PixArt-Sigma-XL-2-2K-MS`
-- [ ] Run true native 2048 with official 2K weights
-- [ ] Compare 1024-weights@2048 vs official 2K@2048 visually/metrics
+- [x] Download official 2K transformer `PixArt-alpha/PixArt-Sigma-XL-2-2K-MS`
+- [x] Run true native 2048 with official 2K weights: `latent=256x256`, `sample_size=256`
+- [~] Compare 1024-weights@2048 vs official 2K@2048 visually (first comparison done; metrics next)
 
 ## P2. Token-level textual inversion
 

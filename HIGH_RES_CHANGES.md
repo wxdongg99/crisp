@@ -79,3 +79,38 @@ All images are under:
 Native 2048 is feasible on one local GPU with CPU offload + attention slicing;
 1024 runs comfortably without offload. Next comparison should be against SDXL
 1024 + high-res fix, plus a mask-conditioned PixArt probe.
+
+## 2026-11-22 native-resolution correction
+
+### Fix
+
+- `highres/pixart_sigma_generate.py` now defaults to
+  `use_resolution_binning=False`.
+- Manifests now record requested/denoise/latent/output sizes,
+  `vae_scale_factor`, `transformer_sample_size`, and the binning flag.
+
+### Native 2048 results
+
+| run | transformer | denoise | latent | output |
+|---|---|---|---:|---:|---:|
+| `native2048_1024weights` | 1024 weights, sample_size=128 | 2048² | 256² | 2048² |
+| `native2048_official2k` | official 2K weights, sample_size=256 | 2048² | 256² | 2048² |
+
+The 1024-weight 2048 run is visibly degraded and should not be reported as
+native 2K capability. The official 2K transformer produces a materially better
+texture at the same requested resolution.
+
+Comparison image:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/pixart_sigma/
+  native2048_1024weights_vs_2k.jpg
+```
+
+### Download provenance
+
+- T5 / VAE / tokenizer / scheduler: ModelScope
+  `AI-ModelScope/pixart_sigma_sdxlvae_T5_diffusers`
+- 2K transformer: HuggingFace mirror
+  `PixArt-alpha/PixArt-Sigma-XL-2-2K-MS` (aria2c, 4 connections)
+- ModelScope does not currently expose the official Sigma 2K transformer repo.
