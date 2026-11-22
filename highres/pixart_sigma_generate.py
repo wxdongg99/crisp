@@ -37,6 +37,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dtype", default="fp16", choices=["fp16", "bf16", "fp32"])
     p.add_argument("--enable_cpu_offload", action="store_true")
     p.add_argument("--enable_attention_slicing", action="store_true")
+    p.add_argument("--use_resolution_binning", action="store_true",
+                   help="Enable PixArt aspect-ratio binning. Default false: denoise at the requested native resolution.")
     p.add_argument("--output_dir", default="highres_runs/pixart_sigma")
     p.add_argument("--run_name", default="")
     return p.parse_args()
@@ -83,6 +85,15 @@ def main() -> None:
     if args.enable_attention_slicing:
         pipe.enable_attention_slicing()
 
+    vae_scale_factor = int(pipe.vae_scale_factor)
+    transformer_sample_size = int(pipe.transformer.config.sample_size)
+    latent_height = height // vae_scale_factor
+    latent_width = width // vae_scale_factor
+    if height % vae_scale_factor or width % vae_scale_factor:
+        raise ValueError(f"Resolution must be divisible by VAE scale factor {vae_scale_factor}")
+    print(f"[PixArt-Sigma] denoise={width}x{height} latent={latent_width}x{latent_height} "
+          f"sample_size={transformer_sample_size} resolution_binning={args.use_resolution_binning}")
+
     prompts = load_prompts(args)
     records = []
     for prompt_idx, prompt in enumerate(prompts):
@@ -100,6 +111,7 @@ def main() -> None:
                 guidance_scale=args.guidance_scale,
                 num_images_per_prompt=n,
                 generator=generator,
+                use_resolution_binning=args.use_resolution_binning,
             )
             for j, image in enumerate(result.images):
                 idx = done + j
@@ -111,6 +123,17 @@ def main() -> None:
                     "negative_prompt": args.negative_prompt,
                     "seed": seed,
                     "index": idx,
+                    "requested_width": width,
+                    "requested_height": height,
+                    "denoise_width": width,
+                    "denoise_height": height,
+                    "latent_width": latent_width,
+                    "latent_height": latent_height,
+                    "vae_scale_factor": vae_scale_factor,
+                    "transformer_sample_size": transformer_sample_size,
+                    "use_resolution_binning": args.use_resolution_binning,
+                    "output_width": image.width,
+                    "output_height": image.height,
                 })
             done += n
             print(f"[PixArt-Sigma] prompt {prompt_idx + 1}/{len(prompts)}: {done}/{args.num_images}")
@@ -124,6 +147,9 @@ def main() -> None:
         "dtype": args.dtype,
         "device": args.device,
         "seed": args.seed,
+        "use_resolution_binning": args.use_resolution_binning,
+        "vae_scale_factor": vae_scale_factor,
+        "transformer_sample_size": transformer_sample_size,
         "prompts": prompts,
         "records": records,
     }
