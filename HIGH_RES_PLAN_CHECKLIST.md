@@ -26,7 +26,7 @@ Status legend: `[ ]` todo, `[~]` in progress, `[x]` done.
 - [ ] Keep `tools/textual_inversion_basic.py` as soft-prompt control
 - [x] Add `tools/textual_inversion_token.py` for LDM placeholder-token TI (smoke/trained)
 - [x] Add `highres/textual_inversion_sdxl.py` (dual CLIP, separate token banks; 200-step smoke)
-- [ ] Add `highres/textual_inversion_pixart.py` (T5 input embedding, attention mask)
+- [x] Add `highres/textual_inversion_pixart.py`: 200-step T5 TI smoke
 - [ ] Add `highres/token_embedding.py` only if shared logic is real
 - [~] Placeholder/token save-reload validated for SDXL; LDM still weak
 - [~] SDXL save/reload + generation validated; gradient checks still to add
