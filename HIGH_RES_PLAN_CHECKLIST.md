@@ -39,7 +39,7 @@ Status legend: `[ ]` todo, `[~]` in progress, `[x]` done.
 - [x] PixArt 512/1024 fixed-seed baseline (validation runs)
 - [ ] SDXL 1024 token TI (200 -> 1000 steps)
 - [ ] SDXL 1024 -> 2048 high-res fix baseline
-- [ ] Mask probe: background preservation + mask shift + empty/full mask
+- [x] SDXL mask probe: background preservation + mask shift + empty/full mask
 
 ## P4. PixArt baseline
 
