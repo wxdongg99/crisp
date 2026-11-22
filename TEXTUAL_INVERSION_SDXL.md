@@ -62,3 +62,33 @@ manifest.json
 
 Generation from the learned token is the next step; this run only validates
 the token-level training path.
+
+## Generation from the learned token
+
+Added `highres/sdxl_token_generate.py`: loads the saved dual-CLIP token vectors,
+adds the placeholder to both tokenizers, resizes the embedding tables, installs
+the same forward hooks, and samples with the normal SDXL pipeline.
+
+Run:
+
+```bash
+PY=/media/cc/U2-Server/crisp-storage/envs/highres_py38/bin/python
+CUDA_VISIBLE_DEVICES=1 $PY highres/sdxl_token_generate.py \
+  --embedding /media/cc/U2-Server/crisp-storage/textual_inversion_runs/sdxl_token_200/sdxl_token_embedding.pt \
+  --resolution 1024 --num_images 4 --steps 20 --dtype bf16 \
+  --output_dir /media/cc/U2-Server/crisp-storage/highres_runs/sdxl_token \
+  --run_name sdxl_token_200_1024x4 \
+  --enable_attention_slicing --enable_cpu_offload
+```
+
+Output:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_token/
+  sdxl_token_200_1024x4/images/p00_0000.png ... p00_0003.png
+  sdxl_token_200_1024x4/manifest.json
+  sdxl_token_200_1024x4/montage.jpg
+```
+
+This also serves as the save/reload check: the generated images use only the
+serialized token vectors, not the training process state.

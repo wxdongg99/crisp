@@ -28,8 +28,8 @@ Status legend: `[ ]` todo, `[~]` in progress, `[x]` done.
 - [x] Add `highres/textual_inversion_sdxl.py` (dual CLIP, separate token banks; 200-step smoke)
 - [ ] Add `highres/textual_inversion_pixart.py` (T5 input embedding, attention mask)
 - [ ] Add `highres/token_embedding.py` only if shared logic is real
-- [ ] Validate placeholder not split/truncated; only token vector changes
-- [ ] Validate save/reload consistency, gradient finite/nonzero
+- [~] Placeholder/token save-reload validated for SDXL; LDM still weak
+- [~] SDXL save/reload + generation validated; gradient checks still to add
 - [ ] 10-step engineering check -> 200-step -> 1000-step budget
 - [ ] Metrics: held-out denoise loss, fixed seeds, VAE round-trip detail check
 
