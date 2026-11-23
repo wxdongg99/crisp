@@ -7,10 +7,14 @@ import json
 import time
 from pathlib import Path
 
+import sys
 import numpy as np
 import torch
 from PIL import Image
 from torchvision import transforms
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from highres.lfp_mask import lfp_pixel_mask
 
 
 def load_image(path, size):
@@ -33,6 +37,8 @@ def main():
     p.add_argument("--model", default="/media/cc/U2-Server/crisp-storage/models/sdxl-base-1.0")
     p.add_argument("--image", required=True)
     p.add_argument("--mask-box", nargs=4, type=float, default=[0.35, 0.35, 0.65, 0.65])
+    p.add_argument("--mask-image", default="", help="optional real defect mask image")
+    p.add_argument("--mask-project", default="raw", choices=["raw", "lfp"])
     p.add_argument("--prompt", default="a realistic macro photograph of natural beige linen fabric")
     p.add_argument("--negative_prompt", default="blurry, low resolution, jpeg artifacts, text, watermark")
     p.add_argument("--embedding", default="", help="optional token embedding .pt from sdxl token TI")
@@ -56,9 +62,12 @@ def main():
     img_dir = out / "images"
     img_dir.mkdir(parents=True, exist_ok=True)
     source = load_image(args.image, args.resolution)
-    mask = make_mask(args.resolution, args.mask_box)
+    if args.mask_image:
+        mask = Image.open(args.mask_image).convert("L").resize((args.resolution, args.resolution), Image.Resampling.NEAREST)
+    else:
+        mask = make_mask(args.resolution, args.mask_box)
     source.save(out / "source.png")
-    mask.save(out / "mask.png")
+    mask.save(out / "mask_raw.png")
 
     start = time.time()
     print(f"[SDXL-mask] model={args.model} resolution={args.resolution}")
@@ -90,6 +99,16 @@ def main():
         pipe.enable_model_cpu_offload()
     else:
         pipe = pipe.to("cuda")
+    if args.mask_project == "lfp":
+        vae = pipe.vae
+        dev = next(vae.parameters()).device
+        if dev.type != "cpu":
+            vae.to("cpu")
+        mask = lfp_pixel_mask(mask, vae, pipe.vae.config.scaling_factor, pipe.vae_scale_factor)
+        if dev.type != "cpu":
+            vae.to(dev)
+        print(f"[SDXL-mask] LFP projected mask saved")
+    mask.save(out / "mask.png")
     if args.enable_attention_slicing:
         pipe.enable_attention_slicing()
     if torch.cuda.is_available():
@@ -118,6 +137,7 @@ def main():
     manifest = {
         "model": args.model, "image": args.image, "mask_box": args.mask_box,
         "prompt": args.prompt, "negative_prompt": args.negative_prompt,
+        "mask_image": args.mask_image, "mask_project": args.mask_project,
         "embedding": args.embedding, "resolution": args.resolution,
         "steps": args.steps, "strength": args.strength, "seed": args.seed,
         "records": records,
