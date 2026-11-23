@@ -123,6 +123,10 @@ class EmbeddingManager(nn.Module):
     ):
         img=cond_img
         b, n, device = *tokenized_text.shape, tokenized_text.device
+        if name is None:
+            # Unconditional branch: return pure text embeddings without
+            # per-class TI / bg / PSP injection.
+            return embedded_text, None
         # if img is not None:
         #     from torchvision.utils import save_image
         #     print(img.shape,img.min(),img.max())
