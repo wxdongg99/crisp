@@ -59,3 +59,39 @@ Keep highres-exploration isolated.
 Continue SDXL as the primary migration candidate.
 Do not migrate Stage-A/B yet.
 ```
+
+## Update 2026-11-23: new high-res evidence
+
+### Per-pattern dynamic SDXL TI
+
+| pattern | setup | result |
+|---|---|---|
+| 16 | dynamic `random_transform`, raw mask loss, 4800 steps | coherent fabric texture, no defect |
+| 17 | dynamic + LFP v3 loss support, 4800 steps | seed0 localized blue/white blob; seeds 1–2 noisy |
+| 18 | dynamic raw mask loss, 4800 steps | textured background with colored blobs, not realistic defects |
+| 19 | dynamic raw mask loss, 4800 steps | in progress |
+
+Conclusion: token-only SDXL TI still does not learn a transferable anomaly even
+with correct image/mask-synchronized dynamic augmentation and 800 views/image.
+
+### Mask generation
+
+- PixArt 1024 CFG=4.5 with SDPA/bf16 is clearly better than SDXL mask on the
+  fixed-seed stain comparison.
+- PixArt 1024 CFG FP8 inference works at ~3.2 GB peak VRAM.
+- PixArt FP8 training fails on 4090 in torchao float8 matmul.
+- LFP v3 nearest-point support matches v1 area; composite confines edit to the
+  fine-mask region, but generated content is still a bright artifact.
+
+### Revised migration gate
+
+Do **not** port Stage-B yet. Before any CRISP Stage-A/B work:
+
+1. mask-covered region must produce a plausible defect, not bright bands;
+2. SDXL or PixArt must beat the other on a fixed-seed, same-mask benchmark;
+3. per-pattern tokens must show transfer on held-out images;
+4. FP8 training must be validated on supported hardware or dropped.
+
+If migration resumes, start with SDXL + LFP v3 loss support, not PixArt: SDXL
+keeps the f8/4ch latent and 4-channel UNet path closest to CRISP Stage-A, while
+PixArt needs T5/DiT and token/conditioning rewrites.
