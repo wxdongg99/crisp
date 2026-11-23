@@ -247,14 +247,24 @@ class EmbeddingManager(nn.Module):
         if k_bg <= 0:
             raise ValueError(f"bg_token_k must be > 0, got {k_bg}")
         token = self._get_token_for_string(init_word)
-        # The embedding bank may already be on CUDA (notably when loading a
-        # checkpoint during generation); keep the token on the same device.
+        # The embedding bank and the token-embedding module can be on different
+        # devices during load (main.py prepares bg tokens before Lightning moves
+        # the full model to CUDA). Resolve each device separately and then move
+        # the initialized token to the bank device.
         try:
-            _dev = next(self.string_to_param_dict.parameters()).device
+            _bank_dev = next(self.string_to_param_dict.parameters()).device
         except StopIteration:
-            _dev = torch.device("cpu")
+            _bank_dev = torch.device("cpu")
+        _embed_dev = torch.device("cpu")
+        try:
+            if hasattr(self._get_embedding_for_tkn, "weight"):
+                _embed_dev = self._get_embedding_for_tkn.weight.device
+            else:
+                _embed_dev = next(self._get_embedding_for_tkn.parameters()).device
+        except (StopIteration, AttributeError):
+            pass
         with torch.no_grad():
-            init = self._get_embedding_for_tkn(token.to(_dev))
+            init = self._get_embedding_for_tkn(token.to(_embed_dev)).to(_bank_dev)
         names = class_names or list(self.string_to_param_dict.keys())
         for name in names:
             if name in self.bg_token_embeddings:
