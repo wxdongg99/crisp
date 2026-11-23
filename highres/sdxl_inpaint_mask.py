@@ -50,13 +50,14 @@ def main():
     p.add_argument("--num_images", type=int, default=4)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--dtype", default="bf16", choices=["fp16", "bf16", "fp32"])
+    p.add_argument("--scheduler", default="euler", choices=["euler", "ddim"])
     p.add_argument("--output_dir", default="highres_runs/sdxl_mask")
     p.add_argument("--run_name", default="")
     p.add_argument("--enable_cpu_offload", action="store_true")
     p.add_argument("--enable_attention_slicing", action="store_true")
     args = p.parse_args()
 
-    from diffusers import StableDiffusionXLInpaintPipeline
+    from diffusers import StableDiffusionXLInpaintPipeline, DDIMScheduler
 
     dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
     out = Path(args.output_dir) / (args.run_name or time.strftime("sdxl_mask_%Y%m%d_%H%M%S"))
@@ -73,6 +74,11 @@ def main():
     start = time.time()
     print(f"[SDXL-mask] model={args.model} resolution={args.resolution}")
     pipe = StableDiffusionXLInpaintPipeline.from_pretrained(args.model, torch_dtype=dtype)
+    if args.scheduler == "ddim":
+        pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+        print("[SDXL-mask] scheduler=DDIM")
+    else:
+        print("[SDXL-mask] scheduler=EulerDiscrete")
     hooks = []
     if args.embedding:
         ckpt = torch.load(args.embedding, map_location="cpu")
@@ -175,6 +181,7 @@ def main():
         "model": args.model, "image": args.image, "mask_box": args.mask_box,
         "prompt": args.prompt, "negative_prompt": args.negative_prompt,
         "mask_image": args.mask_image, "mask_project": args.mask_project,
+        "scheduler": args.scheduler,
         "composite_mask": args.composite_mask,
         "embedding": args.embedding, "resolution": args.resolution,
         "steps": args.steps, "strength": args.strength, "seed": args.seed,
