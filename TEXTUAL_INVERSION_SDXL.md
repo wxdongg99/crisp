@@ -136,3 +136,24 @@ Generation from EMA:
 Result is still not a plausible defect (gray fabric with logo-like artifacts).
 The 6400-step/5e-3 setup overfits the small crop set and does not learn a
 transferable defect concept. This is a negative result, not a quality baseline.
+
+## Dynamic data enhancement (corrected)
+
+The earlier fixed "6 images × 4 augmented versions = 24 pairs" dataset was
+wrong: new_crisp applies data enhancement dynamically in `ddpm.py`:
+
+```python
+if data_enhance:
+    from utils import random_transform
+    self.data_enhance = random_transform()
+```
+
+`textual_inversion_sdxl.py --data-enhance` now **reuses the existing
+`utils.random_transform`** directly, once per training step. It no longer
+precomputes a fixed 24-pair set. The 4800-step budget is:
+
+```text
+6 source images per pattern × 800 views = 4800 dynamic steps
+```
+
+Only a thin-mask safety fallback is added if rotation makes a mask empty.

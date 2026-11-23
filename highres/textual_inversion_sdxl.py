@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from utils import random_transform
+
+_CRISP_DATA_ENHANCE = random_transform()
 
 import torch
 import torch.nn.functional as F
@@ -63,6 +69,25 @@ def load_targets(paths, mask_paths, size, crops_per_image, device):
             pairs.append((to_t(crop).unsqueeze(0).to(device), m))
     return pairs
 
+def load_dynamic_pair(path, mask_path, size, device, rng):
+    """Use new_crisp's existing utils.random_transform for dynamic augmentation."""
+    img = Image.open(path).convert("RGB").resize((512, 512), Image.Resampling.BICUBIC)
+    mask = Image.open(mask_path).convert("L").resize((512, 512), Image.Resampling.NEAREST)
+    img_t = transforms.ToTensor()(img).unsqueeze(0)
+    mask_t = (transforms.ToTensor()(mask).unsqueeze(0) > 0.5).float()
+    try:
+        img_t2, mask_t2 = _CRISP_DATA_ENHANCE(img_t, mask_t)
+    except RuntimeError:
+        # Thin masks can rotate out of frame; fall back to the untransformed pair.
+        img_t2, mask_t2 = img_t, mask_t
+    if mask_t2.sum() == 0:
+        img_t2, mask_t2 = img_t, mask_t
+    img_t, mask_t = img_t2, mask_t2
+    img_t = F.interpolate(img_t, size=(size, size), mode="bicubic", align_corners=False)
+    mask_t = (F.interpolate(mask_t, size=(size, size), mode="nearest") > 0.5).float()
+    img_t = (img_t * 2.0 - 1.0).to(device)
+    return img_t, mask_t.to(device)
+
 def _encode_with_token(text_encoder, ids, token_id, vec):
     """Run a frozen CLIP text encoder while replacing one token row via a hook."""
     emb_module = text_encoder.text_model.embeddings
@@ -102,6 +127,7 @@ def main():
     p.add_argument("--mask-image", nargs="*", default=[])
     p.add_argument("--mask-loss", action="store_true")
     p.add_argument("--mask-project", default="raw", choices=["raw", "lfp_v3"])
+    p.add_argument("--data-enhance", action="store_true", help="dynamic new_crisp-style augmentation per step")
     p.add_argument("--ema-decay", type=float, default=0.999)
     p.add_argument("--prompt", default="a photo of <anomaly>")
     p.add_argument("--placeholder", default="<anomaly>")
@@ -115,6 +141,7 @@ def main():
     p.add_argument("--output_dir", default="textual_inversion_runs/sdxl_token")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args()
+    rng = random.Random(args.seed)
 
     from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionXLPipeline, UNet2DConditionModel
     from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
@@ -163,25 +190,29 @@ def main():
 
     if args.mask_image and len(args.mask_image) != len(args.image):
         raise ValueError("--mask-image must correspond 1:1 to --image")
-    targets = load_targets(args.image, args.mask_image, args.size, args.crops_per_image, args.device)
-    with torch.no_grad():
-        latents_list = [vae.encode(t[0].to(dtype)).latent_dist.sample() * vae.config.scaling_factor for t in targets]
-        mask_latents = []
-        for _, m in targets:
-            if m is None:
-                mask_latents.append(None)
-                continue
-            if args.mask_project == "lfp_v3":
-                from highres.lfp_mask import lfp_pixel_mask_v3
-                from torchvision.transforms import ToPILImage
-                # m is [1,1,S,S] binary; project with the frozen SDXL VAE.
-                m_pil = ToPILImage()((m[0] * 255).to(torch.uint8).cpu())
-                m_pil = lfp_pixel_mask_v3(m_pil, vae, vae.config.scaling_factor, 8)
-                mt = transforms.ToTensor()(m_pil).unsqueeze(0).to(args.device)
-                m = (mt > 0.5).to(dtype)
-            ml = F.interpolate(m.to(dtype), size=(latents_list[0].shape[-2], latents_list[0].shape[-1]), mode="nearest")
-            mask_latents.append((ml > 0.5).to(dtype))
-    print(f"[TI-SDXL] targets={len(latents_list)} from {len(args.image)} image(s) mask_loss={args.mask_loss}")
+    dynamic = bool(args.data_enhance)
+    if dynamic:
+        latents_list, mask_latents = [], []
+        print(f"[TI-SDXL] dynamic data_enhance from {len(args.image)} image(s)")
+    else:
+        targets = load_targets(args.image, args.mask_image, args.size, args.crops_per_image, args.device)
+        with torch.no_grad():
+            latents_list = [vae.encode(t[0].to(dtype)).latent_dist.sample() * vae.config.scaling_factor for t in targets]
+            mask_latents = []
+            for _, m in targets:
+                if m is None:
+                    mask_latents.append(None)
+                    continue
+                if args.mask_project == "lfp_v3":
+                    from highres.lfp_mask import lfp_pixel_mask_v3
+                    from torchvision.transforms import ToPILImage
+                    m_pil = ToPILImage()((m[0] * 255).to(torch.uint8).cpu())
+                    m_pil = lfp_pixel_mask_v3(m_pil, vae, vae.config.scaling_factor, 8)
+                    mt = transforms.ToTensor()(m_pil).unsqueeze(0).to(args.device)
+                    m = (mt > 0.5).to(dtype)
+                ml = F.interpolate(m.to(dtype), size=(latents_list[0].shape[-2], latents_list[0].shape[-1]), mode="nearest")
+                mask_latents.append((ml > 0.5).to(dtype))
+        print(f"[TI-SDXL] targets={len(latents_list)} from {len(args.image)} image(s) mask_loss={args.mask_loss}")
     add_time_ids = torch.tensor([[args.size, args.size, 0, 0, args.size, args.size]],
                                 device=args.device, dtype=dtype)
     opt = torch.optim.AdamW([vec1, vec2], lr=args.lr, betas=(0.9, 0.999), weight_decay=0.0)
@@ -191,16 +222,33 @@ def main():
         prompt_embeds, pooled = get_prompt_embeds(text_encoder, text_encoder_2, tokenizer, tokenizer_2,
                                                   args.prompt, token_id, token_id_2,
                                                   vec1.to(dtype), vec2.to(dtype), args.device)
-        idx = (step - 1) % len(latents_list)
-        latents = latents_list[idx]
+        if dynamic:
+            j = (step - 1) % len(args.image)
+            img_t, m_t = load_dynamic_pair(args.image[j], args.mask_image[j] if args.mask_image else None,
+                                           args.size, args.device, rng)
+            with torch.no_grad():
+                latents = vae.encode(img_t.to(dtype)).latent_dist.sample() * vae.config.scaling_factor
+            ml = None
+            if args.mask_loss and m_t is not None:
+                if args.mask_project == "lfp_v3":
+                    from highres.lfp_mask import lfp_pixel_mask_v3
+                    from torchvision.transforms import ToPILImage
+                    mp = ToPILImage()((m_t[0] * 255).to(torch.uint8).cpu())
+                    mp = lfp_pixel_mask_v3(mp, vae, vae.config.scaling_factor, 8)
+                    m_t = (transforms.ToTensor()(mp).unsqueeze(0).to(args.device) > 0.5)
+                ml = F.interpolate(m_t.to(dtype), size=latents.shape[-2:], mode="nearest")
+                ml = (ml > 0.5).to(dtype)
+        else:
+            idx = (step - 1) % len(latents_list)
+            latents = latents_list[idx]
+            ml = mask_latents[idx] if args.mask_loss else None
         noise = torch.randn_like(latents)
         timesteps = torch.randint(0, scheduler.config.num_train_timesteps, (latents.shape[0],),
                                   device=args.device).long()
         noisy = scheduler.add_noise(latents, noise, timesteps)
         pred = unet(noisy, timesteps, encoder_hidden_states=prompt_embeds,
                     added_cond_kwargs={"text_embeds": pooled, "time_ids": add_time_ids}).sample
-        if args.mask_loss and mask_latents[idx] is not None:
-            ml = mask_latents[idx]
+        if ml is not None:
             per = (pred - noise) ** 2 * ml
             loss = per.sum() / (ml.sum() * pred.shape[1]).clamp_min(1.0)
         else:
@@ -224,7 +272,7 @@ def main():
         "prompt": args.prompt, "placeholder": args.placeholder, "steps": args.steps,
         "lr": args.lr, "images": args.image, "crops_per_image": args.crops_per_image,
         "ema_decay": args.ema_decay, "seed": args.seed, "size": args.size,
-        "targets": len(latents_list), "mask_loss": args.mask_loss, "mask_project": args.mask_project, "mask_image": args.mask_image,
+        "targets": len(latents_list), "dynamic_data_enhance": dynamic, "mask_loss": args.mask_loss, "mask_project": args.mask_project, "mask_image": args.mask_image,
         "note": "only placeholder rows in both SDXL text encoders are trainable",
     }, indent=2))
     print(f"[TI-SDXL] wrote {out}")
