@@ -93,3 +93,30 @@ activations dominate, not weights. CFG doubles the batch/activation footprint.
 4. T5 CPU + transformer/VAE GPU
 5. If still OOM: two-GPU T5/UNet split
 ```
+
+## 2026-11-23 actual results after steps 1–3
+
+Implemented:
+
+1. `pipe.transformer.requires_grad_(False)`, `pipe.vae.requires_grad_(False)`;
+2. `torch.set_grad_enabled(False)` for the whole mask loop;
+3. `--dtype bf16`;
+4. `--attn-backend sdpa` using `AttnProcessor2_0`.
+
+Measured on the local 24 GB RTX 4090:
+
+| run | CFG | steps | generation sec | peak VRAM |
+|---|---:|---:|---:|---:|
+| `stain_1024_sdpa` | 1.0 | 20 | 2.50 | 3,794 MB |
+| `stain_1024_cfg45_sdpa` | 4.5 | 20 | 4.05 | 3,797 MB |
+
+This is a large drop from the previous ~19–47 GB OOM behavior. The 1024
+CFG=4.5 result is a coherent dark liquid/stain inside the mask; no two-GPU split
+or FP8 is needed at this resolution.
+
+Comparison:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/pixart_mask/
+  sdpa_cfg_comparison.jpg
+```

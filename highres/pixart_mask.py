@@ -52,6 +52,7 @@ def main():
     p.add_argument("--enable_attention_slicing", action="store_true")
     p.add_argument("--enable_sequential_offload", action="store_true")
     p.add_argument("--t5-device", default="cpu", choices=["cpu", "cuda"])
+    p.add_argument("--attn-backend", default="sdpa", choices=["default", "sdpa", "xformers", "sliced"])
     args = p.parse_args()
 
     from diffusers import PixArtSigmaPipeline
@@ -94,8 +95,17 @@ def main():
         pipe.vae.to("cuda")
     if args.enable_attention_slicing:
         pipe.enable_attention_slicing()
+    if args.attn_backend != "default":
+        from diffusers.models.attention_processor import AttnProcessor2_0, SlicedAttnProcessor, XFormersAttnProcessor
+        if args.attn_backend == "sdpa":
+            pipe.transformer.set_attn_processor(AttnProcessor2_0())
+        elif args.attn_backend == "xformers":
+            pipe.transformer.set_attn_processor(XFormersAttnProcessor())
+        else:
+            pipe.transformer.set_attn_processor(SlicedAttnProcessor(slice_size=1))
     pipe.transformer.requires_grad_(False)
     pipe.vae.requires_grad_(False)
+    torch.set_grad_enabled(False)
     device = torch.device("cuda")
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
@@ -136,6 +146,8 @@ def main():
     mask_lat = (mask_lat > 0.5).to(dtype)
 
     gen_start = time.time()
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
     records = []
     mask_np = np.asarray(mask_pil) > 127
     src_np = np.asarray(source_pil.resize((args.resolution, args.resolution))).astype(np.float32)
@@ -184,7 +196,9 @@ def main():
         "pipeline_load_sec": round(loaded-start,2),
         "generation_elapsed_sec": round(time.time()-gen_start,2),
         "run_elapsed_sec": round(time.time()-start,2),
+        "attn_backend": args.attn_backend,
         "peak_vram_allocated_mb": round(torch.cuda.max_memory_allocated()/(1024**2),1) if torch.cuda.is_available() else None,
+        "peak_vram_reserved_mb": round(torch.cuda.max_memory_reserved()/(1024**2),1) if torch.cuda.is_available() else None,
     }, indent=2))
     print(f"[PixArt-mask] wrote {out}")
 
