@@ -85,15 +85,37 @@ def main():
         pipe.text_encoder_2.resize_token_embeddings(len(pipe.tokenizer_2))
         tid1 = pipe.tokenizer.convert_tokens_to_ids(placeholder)
         tid2 = pipe.tokenizer_2.convert_tokens_to_ids(placeholder)
+        def expand_mask(mask, ids, token_id, n_vec):
+            out = mask.clone()
+            for b in range(out.shape[0]):
+                pos = (ids[b] == token_id).nonzero(as_tuple=False).flatten()
+                if pos.numel() == 0:
+                    continue
+                p = int(pos[0])
+                out[b] = torch.cat([out[b, :p], torch.ones(n_vec, device=out.device, dtype=out.dtype),
+                                    out[b, p + 1:]], dim=0)[:out.shape[1]]
+            return out
         def install(encoder, token_id, vec):
             def hook(module, a, kw, output):
                 ids = (kw or {}).get("input_ids", a[0] if a else None)
                 o = output.clone()
-                pos = (ids == token_id).nonzero(as_tuple=False)
-                for _, idx in pos:
-                    o[0, idx] = vec.to(o.dtype)
+                for b in range(o.shape[0]):
+                    pos = (ids[b] == token_id).nonzero(as_tuple=False).flatten()
+                    if pos.numel() == 0:
+                        continue
+                    p = int(pos[0])
+                    v = vec.to(device=o.device, dtype=o.dtype)
+                    o[b] = torch.cat([o[b, :p], v, o[b, p + 1:]], dim=0)[:o.shape[1]]
                 return o
-            return encoder.text_model.embeddings.register_forward_hook(hook, with_kwargs=True)
+            emb = encoder.text_model.embeddings.register_forward_hook(hook, with_kwargs=True)
+            def mask_pre(module, hargs, hkwargs):
+                ids = hkwargs.get("input_ids")
+                mask = hkwargs.get("attention_mask")
+                if ids is not None and mask is not None:
+                    hkwargs["attention_mask"] = expand_mask(mask, ids, token_id, vec.shape[0])
+                return hargs, hkwargs
+            mh = encoder.register_forward_pre_hook(mask_pre, with_kwargs=True)
+            return emb, mh
         hooks = [install(pipe.text_encoder, tid1, vec1), install(pipe.text_encoder_2, tid2, vec2)]
         print(f"[SDXL-mask] loaded token embedding {args.embedding}")
     if args.enable_cpu_offload:
@@ -144,7 +166,11 @@ def main():
                         "composite": composite_path})
         print(f"[SDXL-mask] {i+1}/{args.num_images} bg_mae={bg:.2f}")
     for h in hooks:
-        h.remove()
+        if isinstance(h, (tuple, list)):
+            for hh in h:
+                hh.remove()
+        else:
+            h.remove()
     manifest = {
         "model": args.model, "image": args.image, "mask_box": args.mask_box,
         "prompt": args.prompt, "negative_prompt": args.negative_prompt,

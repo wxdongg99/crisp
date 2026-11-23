@@ -151,3 +151,41 @@ still does not learn a transferable fabric defect.
 
 Interpretation: the token block is learning a generic "anomaly/object" concept
 from too few images and random prompt templates; this is not yet a defect token.
+
+## Generation must be inpainting, not text-to-image
+
+new_crisp `log_images` calls:
+
+```python
+self.sample_log(cond=c, x0=z[:N], mask=mask, ...)
+```
+
+DDIM inpainting blends every step:
+
+```python
+img = img * mask + (1 - mask) * img_orig
+```
+
+with `img_orig = q_sample(x0, ts)` and `mask` = defect support. So the source
+image latent is fixed outside the mask; only the mask region is generated.
+
+The earlier SDXL token generations used text-to-image and were therefore the
+wrong protocol. Added multi-vector token + expanded attention mask to
+`highres/sdxl_inpaint_mask.py` and ran:
+
+```text
+source: normal fabric image
+mask: pattern16 real defect mask
+prompt: a photo of a fabric defect, <pattern16>, high detail
+token: multi4 anomaly-initialized SDXL token
+```
+
+Result directory:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_mask/
+  token_multi4_inpaint_1024/
+```
+
+The inpainting path now matches the intended protocol; current content is still
+weak and needs prompt/strength/mask tuning.
