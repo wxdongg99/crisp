@@ -57,3 +57,22 @@ present but needs a free GPU to validate.
 
 This is explicit placement, not model sharding; source latents are moved to the
 transformer device, and decoding is moved to the VAE device.
+
+## FP8 multi-seed PixArt mask
+
+PixArt 1024 mask, CFG=4.5, FP8 transformer, seeds 0–2:
+
+```text
+fp8_seed0, fp8_seed1, fp8_seed2
+```
+
+Montage:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/pixart_mask/
+  fp8_multiseed_montage.jpg
+```
+
+All three seeds produce coherent dark stain-like regions inside the mask while
+preserving background. FP8 inference is therefore validated visually on PixArt
+1024 mask.
