@@ -94,6 +94,8 @@ def main():
         pipe.vae.to("cuda")
     if args.enable_attention_slicing:
         pipe.enable_attention_slicing()
+    pipe.transformer.requires_grad_(False)
+    pipe.vae.requires_grad_(False)
     device = torch.device("cuda")
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
