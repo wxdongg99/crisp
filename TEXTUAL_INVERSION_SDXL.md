@@ -192,3 +192,22 @@ Visual check:
 /media/cc/U2-Server/crisp-storage/textual_inversion_runs/
   aug_mask_sync_check.jpg
 ```
+
+## Dynamic pattern17 (LFP v3 loss) result
+
+pattern17 used dynamic `utils.random_transform`, 4800 steps, lr=5e-3, and
+LFP v3 only inside the latent loss support.
+
+Generation:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_token/
+  pattern17_lfpv3_dynamic_1024/
+```
+
+Seed 0 shows a localized bright/blue anomaly-like blob; seeds 1–2 are noisy
+textures. Still not a reliable defect generator, but the LFP v3 loss support
+does localize some structure compared with pattern16's uniform texture.
+
+LFP v3 projection is per-step and expensive: pattern17 took much longer than
+pattern16. Caching or GPU-side projection is a clear next optimization.
