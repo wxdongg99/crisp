@@ -32,6 +32,7 @@ def main():
     p.add_argument("--image", required=True)
     p.add_argument("--prompt", default="a photo of <anomaly>")
     p.add_argument("--placeholder", default="<anomaly>")
+    p.add_argument("--init-word", "--init_word", dest="init_word", default="anomaly")
     p.add_argument("--size", type=int, default=1024)
     p.add_argument("--steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=5e-4)
@@ -59,8 +60,13 @@ def main():
     tokenizer.add_tokens([args.placeholder])
     text_encoder.resize_token_embeddings(len(tokenizer))
     token_id = tokenizer.convert_tokens_to_ids(args.placeholder)
-    embedding = text_encoder.get_input_embeddings().weight
-    vec = torch.nn.Parameter(embedding[token_id].detach().float().clone())
+    embedding = text_encoder.get_input_embeddings()
+    init_ids = tokenizer(args.init_word, add_special_tokens=False).input_ids
+    init_id = init_ids[0] if init_ids else token_id
+    with torch.no_grad():
+        embedding.weight[token_id].copy_(embedding.weight[init_id])
+    vec = torch.nn.Parameter(embedding.weight[init_id].detach().float().clone())
+    print(f"[TI-PixArt] init_word={args.init_word!r} init_ids={init_ids}")
     for m in (vae, transformer, text_encoder):
         m.requires_grad_(False)
         m.eval()
@@ -101,7 +107,7 @@ def main():
                 "token_id": token_id, "model": args.model}, out / "pixart_token_embedding.pt")
     (out / "manifest.json").write_text(json.dumps({
         "model": args.model, "prompt": args.prompt, "placeholder": args.placeholder,
-        "steps": args.steps, "lr": args.lr, "image": args.image, "seed": args.seed,
+        "steps": args.steps, "lr": args.lr, "image": args.image, "seed": args.seed, "init_word": args.init_word,
         "note": "only the T5 placeholder token row is trainable",
     }, indent=2))
     print(f"[TI-PixArt] wrote {out}")

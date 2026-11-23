@@ -170,7 +170,7 @@ def main():
     p.add_argument("--ema-decay", type=float, default=0.999)
     p.add_argument("--prompt", default="a photo of <anomaly>")
     p.add_argument("--placeholder", default="<anomaly>")
-    p.add_argument("--init-word", default="sculpture")
+    p.add_argument("--init-word", "--init_word", dest="init_word", default="anomaly")
     p.add_argument("--num-vectors", type=int, default=4)
     p.add_argument("--random-prompts", action="store_true")
     p.add_argument("--steps", type=int, default=200)
@@ -221,6 +221,7 @@ def main():
     # the random resize_token_embeddings row.
     init_ids = tokenizer(args.init_word, add_special_tokens=False).input_ids
     init_ids2 = tokenizer_2(args.init_word, add_special_tokens=False).input_ids
+    print(f"[TI-SDXL] init_word={args.init_word!r} init_ids={init_ids} init_ids2={init_ids2}")
     init_id = init_ids[0] if init_ids else token_id
     init_id2 = init_ids2[0] if init_ids2 else token_id_2
     with torch.no_grad():
@@ -321,13 +322,13 @@ def main():
             print(f"[TI-SDXL] step={step:4d} loss={loss.item():.6f}")
 
     torch.save({"vec1": vec1.detach().cpu(), "vec2": vec2.detach().cpu(),
-                "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec,
+                "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word,
                 "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding.pt")
     torch.save({"vec1": ema1.cpu(), "vec2": ema2.cpu(),
-                "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec,
+                "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word,
                 "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding_ema.pt")
     (out / "manifest.json").write_text(json.dumps({
-        "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "random_prompts": args.random_prompts, "steps": args.steps,
+        "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word, "random_prompts": args.random_prompts, "steps": args.steps,
         "lr": args.lr, "images": args.image, "crops_per_image": args.crops_per_image,
         "ema_decay": args.ema_decay, "seed": args.seed, "size": args.size,
         "targets": len(latents_list), "dynamic_data_enhance": dynamic, "mask_loss": args.mask_loss, "mask_project": args.mask_project, "mask_image": args.mask_image,

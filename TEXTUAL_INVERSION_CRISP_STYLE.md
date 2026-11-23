@@ -105,3 +105,21 @@ Current 4800-step run:
 ```text
 sdxl_token_pattern16_multi4_mask_4800
 ```
+
+## Initialization word
+
+The learned token block must start from a semantically meaningful word, not the
+random row created by `resize_token_embeddings`.
+
+Default is now:
+
+```text
+--init_word anomaly
+```
+
+Both SDXL CLIP encoders initialize their N vectors by repeating that word's
+embedding. `--init-word` and `--init_word` are aliases. The manifest and
+checkpoint record the init word.
+
+For PixArt T5, the placeholder token row is also initialized from
+`--init_word anomaly` before training.
