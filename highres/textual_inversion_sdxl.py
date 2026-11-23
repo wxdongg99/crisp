@@ -86,7 +86,9 @@ def load_dynamic_pair(path, mask_path, size, device, rng):
     img_t = F.interpolate(img_t, size=(size, size), mode="bicubic", align_corners=False)
     mask_t = (F.interpolate(mask_t, size=(size, size), mode="nearest") > 0.5).float()
     img_t = (img_t * 2.0 - 1.0).to(device)
-    return img_t, mask_t.to(device)
+    mask_t = mask_t.to(device)
+    assert img_t.shape[-2:] == mask_t.shape[-2:], "image/mask spatial mismatch"
+    return img_t, mask_t
 
 def _encode_with_token(text_encoder, ids, token_id, vec):
     """Run a frozen CLIP text encoder while replacing one token row via a hook."""
@@ -128,6 +130,7 @@ def main():
     p.add_argument("--mask-loss", action="store_true")
     p.add_argument("--mask-project", default="raw", choices=["raw", "lfp_v3"])
     p.add_argument("--data-enhance", action="store_true", help="dynamic new_crisp-style augmentation per step")
+    p.add_argument("--debug-mask-dir", default="", help="save image+mask overlays for geometry checks")
     p.add_argument("--ema-decay", type=float, default=0.999)
     p.add_argument("--prompt", default="a photo of <anomaly>")
     p.add_argument("--placeholder", default="<anomaly>")
@@ -226,6 +229,15 @@ def main():
             j = (step - 1) % len(args.image)
             img_t, m_t = load_dynamic_pair(args.image[j], args.mask_image[j] if args.mask_image else None,
                                            args.size, args.device, rng)
+            if args.debug_mask_dir and step <= 4:
+                from PIL import ImageDraw
+                dbg = Path(args.debug_mask_dir); dbg.mkdir(parents=True, exist_ok=True)
+                vis = ((img_t[0].detach().float().cpu() * 0.5 + 0.5).clamp(0, 1) * 255).byte()
+                vis = vis.permute(1, 2, 0).numpy()
+                mm = (m_t[0, 0].detach().cpu().numpy() > 0.5)
+                img_dbg = Image.fromarray(vis).convert("RGB")
+                arr = np.asarray(img_dbg).copy(); arr[mm] = (0.5 * arr[mm] + 0.5 * np.array([255, 0, 0])).astype(np.uint8)
+                Image.fromarray(arr).save(dbg / f"step{step:04d}.png")
             with torch.no_grad():
                 latents = vae.encode(img_t.to(dtype)).latent_dist.sample() * vae.config.scaling_factor
             ml = None
