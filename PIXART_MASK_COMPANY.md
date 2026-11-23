@@ -43,3 +43,29 @@ Findings:
 - test 1024 no-CFG (running)
 - try `attention_slicing`/smaller transformer chunking, or a 2-GPU split
 - do not claim PixArt mask quality until CFG or an equivalent guidance path runs
+
+## Fixed-seed 512 comparison (same source/mask/prompt)
+
+SDXL plain inpaint:
+
+```text
+run: stain_512_compare
+background MAE: 4.65
+```
+
+PixArt mask no-CFG:
+
+```text
+run: stain_512_company
+background MAE: 5.04
+```
+
+Comparison:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_vs_pixart_mask512.jpg
+```
+
+Observation: SDXL produces a subtle but coherent local edit; PixArt no-CFG
+produces high-contrast garbage inside the mask. The PixArt path is not usable
+for quality comparison until CFG or an equivalent guidance path fits in memory.
