@@ -123,3 +123,31 @@ checkpoint record the init word.
 
 For PixArt T5, the placeholder token row is also initialized from
 `--init_word anomaly` before training.
+
+## Multi-vector 4 + anomaly initialization result
+
+Run:
+
+```text
+pattern16, 6 images, dynamic random_transform, 4800 steps, lr=5e-3
+num_vectors=4, init_word=anomaly, random imagenet templates, mask loss
+attention_mask expanded
+```
+
+Training finished at step 4800.
+
+Generation:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_token/
+  pattern16_multi4_anomaly_1024/
+  pattern16_multi4_anomaly_fixedprompt/
+```
+
+Result: with the saved prompt, seeds produce unrelated objects (wooden deck,
+olive fabric, brown garment); with an explicit fabric-defect prompt, the result
+is gray fabric with a button/seam, no defect. Multi-vector + anomaly init alone
+still does not learn a transferable fabric defect.
+
+Interpretation: the token block is learning a generic "anomaly/object" concept
+from too few images and random prompt templates; this is not yet a defect token.
