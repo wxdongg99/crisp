@@ -53,6 +53,9 @@ def main():
     p.add_argument("--enable_sequential_offload", action="store_true")
     p.add_argument("--t5-device", default="cpu", choices=["cpu", "cuda"])
     p.add_argument("--attn-backend", default="sdpa", choices=["default", "sdpa", "xformers", "sliced"])
+    p.add_argument("--fp8", action="store_true", help="FP8 transformer weights; requires torchao")
+    p.add_argument("--tx-device", default="cuda", help="transformer device, e.g. cuda:1")
+    p.add_argument("--vae-device", default="cuda", help="VAE device, e.g. cuda:0")
     args = p.parse_args()
 
     from diffusers import PixArtSigmaPipeline
@@ -91,10 +94,14 @@ def main():
         pipe.text_encoder.to(t5_device)
         if args.t5_device == "cpu":
             pipe.text_encoder.to(torch.float32)
-        pipe.transformer.to("cuda")
-        pipe.vae.to("cuda")
+        pipe.transformer.to(torch.device(args.tx_device))
+        pipe.vae.to(torch.device(args.vae_device))
     if args.enable_attention_slicing:
         pipe.enable_attention_slicing()
+    if args.fp8:
+        from highres.fp8_utils import apply_fp8_inference
+        apply_fp8_inference(pipe.transformer)
+        print("[PixArt-mask] FP8 weight-only transformer enabled")
     if args.attn_backend != "default":
         from diffusers.models.attention_processor import AttnProcessor2_0, SlicedAttnProcessor, XFormersAttnProcessor
         if args.attn_backend == "sdpa":
@@ -106,7 +113,8 @@ def main():
     pipe.transformer.requires_grad_(False)
     pipe.vae.requires_grad_(False)
     torch.set_grad_enabled(False)
-    device = torch.device("cuda")
+    device = torch.device(args.tx_device)
+    vae_device = torch.device(args.vae_device)
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     loaded = time.time()
@@ -139,7 +147,8 @@ def main():
     start_idx = min(int(args.steps * (1.0 - args.strength)), len(timesteps) - 1)
     timesteps = timesteps[start_idx:]
     with torch.no_grad():
-        src_lat = pipe.vae.encode(src_t).latent_dist.sample() * pipe.vae.config.scaling_factor
+        src_lat = pipe.vae.encode(src_t.to(vae_device)).latent_dist.sample() * pipe.vae.config.scaling_factor
+    src_lat = src_lat.to(device)
     mask_lat = F.interpolate(
         transforms.ToTensor()(mask_pil).unsqueeze(0).to(device, dtype),
         size=(src_lat.shape[-2], src_lat.shape[-1]), mode="nearest")
@@ -176,7 +185,7 @@ def main():
                 bg = src_lat
             latents = (1 - mask_lat) * bg + mask_lat * latents
         with torch.no_grad():
-            image = pipe.vae.decode(latents / pipe.vae.config.scaling_factor).sample
+            image = pipe.vae.decode((latents / pipe.vae.config.scaling_factor).to(vae_device)).sample
         image = pipe.image_processor.postprocess(image, output_type="pil")[0]
         name = f"p00_{i:04d}.png"
         image.save(img_dir / name)

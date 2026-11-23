@@ -89,3 +89,25 @@ Conclusion: v3 removes v1's border-support artifacts and matches v1's area,
 but the SDXL inpaint result inside the band is still a bright artefact, not a
 plausible defect. This suggests the problem is not only mask support but also
 the model/prompt conditioning for thin defects.
+
+## LFP v3 defect-region composite
+
+Added `--composite-mask` to `sdxl_inpaint_mask.py`: generate with LFP v3 but
+paste back only the original fine-mask support.
+
+Run:
+
+```text
+lfp_v3_composite_512
+```
+
+Result:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_lfp/
+  lfp_v3_composite_512/comparison.jpg
+```
+
+The composite confines the edit to the thin original defect line instead of the
+whole v3 band, but the generated content is still a bright line-like artifact,
+not a plausible fabric defect.

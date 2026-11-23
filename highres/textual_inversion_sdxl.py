@@ -109,6 +109,7 @@ def main():
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--size", type=int, default=1024)
     p.add_argument("--dtype", default="bf16", choices=["fp16", "bf16", "fp32"])
+    p.add_argument("--fp8", action="store_true", help="FP8 training of the UNet; requires torchao")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output_dir", default="textual_inversion_runs/sdxl_token")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -134,6 +135,10 @@ def main():
     text_encoder_2.resize_token_embeddings(len(tokenizer_2))
     vae = AutoencoderKL.from_pretrained(args.model, subfolder="vae", torch_dtype=dtype).to(args.device)
     unet = UNet2DConditionModel.from_pretrained(args.model, subfolder="unet", torch_dtype=dtype).to(args.device)
+    if args.fp8:
+        from highres.fp8_utils import apply_fp8_training
+        unet = apply_fp8_training(unet)
+        print("[TI-SDXL] FP8 training enabled on UNet")
     scheduler = DDPMScheduler.from_pretrained(args.model, subfolder="scheduler")
 
     for m in (vae, unet, text_encoder, text_encoder_2):

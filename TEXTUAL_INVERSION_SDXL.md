@@ -117,3 +117,22 @@ EMA = 0.999
 
 The earlier 300-step run is only a short smoke and should not be used for
 quality conclusions.
+
+## 6400-step masked pattern16 result
+
+Training completed:
+
+```text
+8 image/mask pairs, 6400 steps, lr=5e-3, mask-loss, EMA
+```
+
+Generation from EMA:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_token/
+  pattern16_masked6400_1024/
+```
+
+Result is still not a plausible defect (gray fabric with logo-like artifacts).
+The 6400-step/5e-3 setup overfits the small crop set and does not learn a
+transferable defect concept. This is a negative result, not a quality baseline.

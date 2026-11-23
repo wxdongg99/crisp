@@ -120,3 +120,20 @@ Comparison:
 /media/cc/U2-Server/crisp-storage/highres_runs/pixart_mask/
   sdpa_cfg_comparison.jpg
 ```
+
+## Two-device placement and FP8 hooks
+
+`highres/pixart_mask.py` now supports:
+
+```text
+--tx-device cuda:1
+--vae-device cuda:0
+```
+
+for explicit transformer/VAE split placement.
+
+`--fp8` inference hooks exist in `highres/fp8_utils.py`; `--fp8` training hooks
+exist in `highres/textual_inversion_sdxl.py`. They require a compatible
+`torchao` build. The local clean env is Python 3.8 and torchao 0.18 is
+incompatible (`tuple[...]` at import), so FP8 was **not** executed locally.
+A Python >=3.10 env is required for a real FP8 run.

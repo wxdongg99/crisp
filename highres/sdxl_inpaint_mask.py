@@ -39,6 +39,7 @@ def main():
     p.add_argument("--mask-box", nargs=4, type=float, default=[0.35, 0.35, 0.65, 0.65])
     p.add_argument("--mask-image", default="", help="optional real defect mask image")
     p.add_argument("--mask-project", default="raw", choices=["raw", "lfp", "lfp_v3"])
+    p.add_argument("--composite-mask", default="", help="optional raw defect mask for final compositing")
     p.add_argument("--prompt", default="a realistic macro photograph of natural beige linen fabric")
     p.add_argument("--negative_prompt", default="blurry, low resolution, jpeg artifacts, text, watermark")
     p.add_argument("--embedding", default="", help="optional token embedding .pt from sdxl token TI")
@@ -132,8 +133,15 @@ def main():
         arr = np.asarray(image).astype(np.float32)
         src = np.asarray(source).astype(np.float32)
         bg = np.abs(arr[~mask_np] - src[~mask_np]).mean()
+        composite_path = ""
+        if args.composite_mask:
+            cm = Image.open(args.composite_mask).convert("L").resize((args.resolution, args.resolution), Image.Resampling.NEAREST)
+            cropped = Image.composite(image, source, cm)
+            composite_path = str(out / f"composite_{i:04d}.png")
+            cropped.save(composite_path)
         records.append({"file": str(img_dir / name), "seed": seed, "output_size": list(image.size),
-                        "background_mae_outside_mask": round(float(bg), 3)})
+                        "background_mae_outside_mask": round(float(bg), 3),
+                        "composite": composite_path})
         print(f"[SDXL-mask] {i+1}/{args.num_images} bg_mae={bg:.2f}")
     for h in hooks:
         h.remove()
@@ -141,6 +149,7 @@ def main():
         "model": args.model, "image": args.image, "mask_box": args.mask_box,
         "prompt": args.prompt, "negative_prompt": args.negative_prompt,
         "mask_image": args.mask_image, "mask_project": args.mask_project,
+        "composite_mask": args.composite_mask,
         "embedding": args.embedding, "resolution": args.resolution,
         "steps": args.steps, "strength": args.strength, "seed": args.seed,
         "records": records,
