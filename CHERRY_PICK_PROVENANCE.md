@@ -15,6 +15,7 @@ fixes cherry-picked from the stable `crisp-cvpr` branch.
 | `dd933be` | `459b791` | Fix bg-token device init; add 40k Stage-A/Stage-B configs |
 | `95d2a86` | `24eb6c3` | Add configurable inpainting CFG for Stage-A generation |
 | `8ac3fdf` | `11c44c1` | Bypass embedding manager directly for unconditional CFG branch |
+| `6d98cc0` | `3c0bcc0` | Initialize unconditional position to None in TransformerWrapper |
 
 ## Notes
 
