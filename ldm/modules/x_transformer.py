@@ -617,6 +617,7 @@ class TransformerWrapper(nn.Module):
             x,position = embedding_manager(x, embedded_x,**kwargs)
         else:
             x = embedded_x
+            position = None
 
         x = x + self.pos_emb(x)
         x = self.emb_dropout(x)
