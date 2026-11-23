@@ -137,3 +137,12 @@ exist in `highres/textual_inversion_sdxl.py`. They require a compatible
 `torchao` build. The local clean env is Python 3.8 and torchao 0.18 is
 incompatible (`tuple[...]` at import), so FP8 was **not** executed locally.
 A Python >=3.10 env is required for a real FP8 run.
+
+## FP8 update
+
+A Python 3.12 env with torchao 0.7 is available at
+`/media/cc/U2-Server/crisp-storage/envs/highres_py312`.
+
+FP8 weight-only inference works for PixArt 1024 CFG: peak 3.2 GB, 7.2 s in the
+unoptimized manual loop. bf16 remains faster in this setup. FP8 training hooks
+are implemented but not yet validated on a free GPU.

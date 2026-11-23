@@ -4,14 +4,14 @@ from __future__ import annotations
 
 def apply_fp8_inference(model):
     try:
-        from torchao.quantization import quantize_, Float8WeightOnlyConfig
+        from torchao.quantization import quantize_, float8_weight_only
     except Exception as exc:  # pragma: no cover - environment dependent
         raise RuntimeError(
             "FP8 inference needs a compatible torchao build "
-            "(Float8WeightOnlyConfig). Current environment import failed: "
+            "(float8_weight_only). Current environment import failed: "
             f"{type(exc).__name__}: {exc}"
         ) from exc
-    quantize_(model, Float8WeightOnlyConfig())
+    quantize_(model, float8_weight_only())
     return model
 
 
