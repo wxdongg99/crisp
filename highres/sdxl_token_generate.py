@@ -36,6 +36,7 @@ def main():
     placeholder = ckpt["placeholder"]
     vec1 = ckpt["vec1"].to(dtype)
     vec2 = ckpt["vec2"].to(dtype)
+    num_vectors = int(ckpt.get("num_vectors", vec1.shape[0]))
     if args.run_name:
         run_name = args.run_name
     else:
@@ -60,9 +61,13 @@ def main():
             if ids is None:
                 ids = args[0]
             o = output.clone()
-            pos = (ids == token_id).nonzero(as_tuple=False)
-            for _, idx in pos:
-                o[0, idx] = vec.to(o.dtype)
+            for b in range(o.shape[0]):
+                pos = (ids[b] == token_id).nonzero(as_tuple=False).flatten()
+                if pos.numel() == 0:
+                    continue
+                p = int(pos[0])
+                v = vec.to(device=o.device, dtype=o.dtype)
+                o[b] = torch.cat([o[b, :p], v, o[b, p + 1:]], dim=0)[:o.shape[1]]
             return o
         return encoder.text_model.embeddings.register_forward_hook(hook, with_kwargs=True)
 
@@ -94,7 +99,7 @@ def main():
     h1.remove(); h2.remove()
     manifest = {
         "model": args.model, "embedding": args.embedding, "prompt": prompt,
-        "placeholder": placeholder, "resolution": args.resolution,
+        "placeholder": placeholder, "num_vectors": num_vectors, "resolution": args.resolution,
         "steps": args.steps, "guidance_scale": args.guidance_scale,
         "seed": args.seed, "records": records,
         "pipeline_load_sec": round(loaded - start, 2),

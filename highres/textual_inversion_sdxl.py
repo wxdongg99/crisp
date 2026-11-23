@@ -7,6 +7,7 @@ trained. VAE, UNet and both text encoders stay frozen.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import random
 import sys
@@ -17,6 +18,18 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from utils import random_transform
+
+
+def load_crisp_prompt_templates():
+    """Read the existing new_crisp template list without importing imgaug."""
+    path = ROOT / "ldm" / "data" / "personalized.py"
+    tree = ast.parse(path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "imagenet_templates_small":
+                    return ast.literal_eval(node.value)
+    raise RuntimeError("imagenet_templates_small not found")
 
 _CRISP_DATA_ENHANCE = random_transform()
 
@@ -91,23 +104,28 @@ def load_dynamic_pair(path, mask_path, size, device, rng):
     return img_t, mask_t
 
 def _encode_with_token(text_encoder, ids, token_id, vec):
-    """Run a frozen CLIP text encoder while replacing one token row via a hook."""
+    """Run frozen CLIP and replace one placeholder row with N learned vectors."""
     emb_module = text_encoder.text_model.embeddings
+    vec = vec
+    n_vec = vec.shape[0]
+
     def hook(module, inputs, output):
         out = output.clone()
-        pos = (ids == token_id).nonzero(as_tuple=False)
-        if pos.numel() == 0:
-            raise ValueError("placeholder token not found after tokenization")
-        for _, idx in pos:
-            out[0, idx] = vec.to(out.dtype)
+        for b in range(out.shape[0]):
+            pos = (ids[b] == token_id).nonzero(as_tuple=False).flatten()
+            if pos.numel() == 0:
+                raise ValueError("placeholder token not found after tokenization")
+            p = int(pos[0])
+            new_row = torch.cat([out[b, :p], vec.to(out.dtype), out[b, p + 1:]], dim=0)[:out.shape[1]]
+            out[b] = new_row
         return out
+
     handle = emb_module.register_forward_hook(hook)
     try:
         out = text_encoder(ids, output_hidden_states=True)
     finally:
         handle.remove()
     return out
-
 
 def get_prompt_embeds(text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt,
                       token_id, token_id_2, vec1, vec2, device):
@@ -134,7 +152,9 @@ def main():
     p.add_argument("--ema-decay", type=float, default=0.999)
     p.add_argument("--prompt", default="a photo of <anomaly>")
     p.add_argument("--placeholder", default="<anomaly>")
-    p.add_argument("--init-word", default="fabric")
+    p.add_argument("--init-word", default="sculpture")
+    p.add_argument("--num-vectors", type=int, default=4)
+    p.add_argument("--random-prompts", action="store_true")
     p.add_argument("--steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--size", type=int, default=1024)
@@ -188,8 +208,12 @@ def main():
     with torch.no_grad():
         emb1.weight[token_id].copy_(emb1.weight[init_id])
         emb2.weight[token_id_2].copy_(emb2.weight[init_id2])
-    vec1 = torch.nn.Parameter(emb1.weight[token_id].detach().float().clone())
-    vec2 = torch.nn.Parameter(emb2.weight[token_id_2].detach().float().clone())
+    n_vec = max(1, int(args.num_vectors))
+    vec1 = torch.nn.Parameter(
+        emb1.weight[init_id].detach().float().repeat(n_vec, 1).clone())
+    vec2 = torch.nn.Parameter(
+        emb2.weight[init_id2].detach().float().repeat(n_vec, 1).clone())
+    templates = load_crisp_prompt_templates() if args.random_prompts else []
 
     if args.mask_image and len(args.mask_image) != len(args.image):
         raise ValueError("--mask-image must correspond 1:1 to --image")
@@ -222,8 +246,11 @@ def main():
     ema1 = vec1.detach().clone()
     ema2 = vec2.detach().clone()
     for step in range(1, args.steps + 1):
+        train_prompt = args.prompt
+        if templates:
+            train_prompt = rng.choice(templates).format(args.placeholder)
         prompt_embeds, pooled = get_prompt_embeds(text_encoder, text_encoder_2, tokenizer, tokenizer_2,
-                                                  args.prompt, token_id, token_id_2,
+                                                  train_prompt, token_id, token_id_2,
                                                   vec1.to(dtype), vec2.to(dtype), args.device)
         if dynamic:
             j = (step - 1) % len(args.image)
@@ -276,13 +303,13 @@ def main():
             print(f"[TI-SDXL] step={step:4d} loss={loss.item():.6f}")
 
     torch.save({"vec1": vec1.detach().cpu(), "vec2": vec2.detach().cpu(),
-                "prompt": args.prompt, "placeholder": args.placeholder,
+                "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec,
                 "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding.pt")
     torch.save({"vec1": ema1.cpu(), "vec2": ema2.cpu(),
-                "prompt": args.prompt, "placeholder": args.placeholder,
+                "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec,
                 "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding_ema.pt")
     (out / "manifest.json").write_text(json.dumps({
-        "prompt": args.prompt, "placeholder": args.placeholder, "steps": args.steps,
+        "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "random_prompts": args.random_prompts, "steps": args.steps,
         "lr": args.lr, "images": args.image, "crops_per_image": args.crops_per_image,
         "ema_decay": args.ema_decay, "seed": args.seed, "size": args.size,
         "targets": len(latents_list), "dynamic_data_enhance": dynamic, "mask_loss": args.mask_loss, "mask_project": args.mask_project, "mask_image": args.mask_image,
