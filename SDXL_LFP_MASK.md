@@ -125,3 +125,36 @@ nearest = np.argpartition(dist.ravel(), target - 1)[:target]
 i.e. rank all pixels by distance to the max-pooled mask and add the closest
 pixels until the support area equals v1 LFP. The earlier "smooth" wording was
 misleading.
+
+## LFP v3 speed optimization
+
+The per-step v3 projection was dominated by the VAE encode + Otsu used to obtain
+the v1 LFP area. Added:
+
+```python
+lfp_pixel_mask_v3_cached(..., cache_key=source_mask_path)
+```
+
+The v1/raw area ratio is computed once per **source mask** and cached. Dynamic
+augmentation changes the mask footprint, so v3 target area is:
+
+```text
+target = augmented_raw_area * cached(v1_area / raw_area)
+```
+
+The nearest-point dilation itself runs on CPU with scipy distance transform.
+
+Benchmark on 1024² mask, CPU VAE:
+
+| call | time |
+|---|---:|
+| first, no cache | 5.24 s |
+| cached first | 5.80 s |
+| cached subsequent | **0.083 s** |
+
+So after the first call per source mask, v3 projection is ~60× faster. The
+first-call cost remains; in training this is paid only once per source image.
+
+Note: for dynamically augmented masks this uses the cached area ratio, so the
+support area is an approximation of exact per-step v1. For loss support this is
+acceptable; if exact area is required, compute v1 per step.

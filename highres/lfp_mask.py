@@ -102,3 +102,40 @@ def lfp_pixel_mask_v3(mask_pil: Image.Image, vae, scale_factor: float,
     out[nearest] = 255
     out = out.reshape(base.shape)
     return Image.fromarray(out, mode="L")
+
+
+_LFP_V3_AREA_RATIO = {}
+
+
+def _nearest_dilate_to_area(mask_pil: Image.Image, target: int, vae_scale: int = 8) -> Image.Image:
+    w, h = mask_pil.size
+    m = torch.from_numpy(np.asarray(mask_pil.convert("L"))).float()[None, None] / 255.0
+    pooled = F.max_pool2d((m >= 0.5).float(), kernel_size=vae_scale, stride=vae_scale)
+    base = F.interpolate(pooled, size=(h, w), mode="nearest")[0, 0] >= 0.5
+    dist = distance_transform_edt(~base.cpu().numpy()).ravel()
+    target = min(int(target), dist.size)
+    nearest = np.argpartition(dist, target - 1)[:target]
+    out = np.zeros(dist.shape, dtype=np.uint8)
+    out[nearest] = 255
+    return Image.fromarray(out.reshape(base.shape), mode="L")
+
+
+def lfp_pixel_mask_v3_cached(mask_pil: Image.Image, vae, scale_factor: float,
+                             vae_scale: int = 8, cache_key: str = "") -> Image.Image:
+    """Fast v3: compute the v1 area ratio once per source mask, then reuse it.
+
+    The per-step VAE encode/Otsu is the dominant cost. For dynamic augmentation
+    the mask footprint changes every step, so we cache only the v1/raw area
+    ratio per source mask and use it to set the v3 target area.
+    """
+    raw_area = int((np.asarray(mask_pil.convert("L")) > 127).sum())
+    if cache_key and cache_key in _LFP_V3_AREA_RATIO:
+        target = int(round(raw_area * _LFP_V3_AREA_RATIO[cache_key]))
+    else:
+        v1 = lfp_pixel_mask(mask_pil, vae, scale_factor, vae_scale)
+        v1_area = int((np.asarray(v1) > 127).sum())
+        ratio = v1_area / max(raw_area, 1)
+        if cache_key:
+            _LFP_V3_AREA_RATIO[cache_key] = ratio
+        target = v1_area
+    return _nearest_dilate_to_area(mask_pil, target, vae_scale)

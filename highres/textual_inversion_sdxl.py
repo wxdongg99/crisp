@@ -204,7 +204,7 @@ def main():
                     mask_latents.append(None)
                     continue
                 if args.mask_project == "lfp_v3":
-                    from highres.lfp_mask import lfp_pixel_mask_v3
+                    from highres.lfp_mask import lfp_pixel_mask_v3, lfp_pixel_mask_v3_cached
                     from torchvision.transforms import ToPILImage
                     m_pil = ToPILImage()((m[0] * 255).to(torch.uint8).cpu())
                     m_pil = lfp_pixel_mask_v3(m_pil, vae, vae.config.scaling_factor, 8)
@@ -231,10 +231,11 @@ def main():
             ml = None
             if args.mask_loss and m_t is not None:
                 if args.mask_project == "lfp_v3":
-                    from highres.lfp_mask import lfp_pixel_mask_v3
+                    from highres.lfp_mask import lfp_pixel_mask_v3, lfp_pixel_mask_v3_cached
                     from torchvision.transforms import ToPILImage
                     mp = ToPILImage()((m_t[0] * 255).to(torch.uint8).cpu())
-                    mp = lfp_pixel_mask_v3(mp, vae, vae.config.scaling_factor, 8)
+                    mp = lfp_pixel_mask_v3_cached(mp, vae, vae.config.scaling_factor, 8,
+                                                   cache_key=args.mask_image[j])
                     m_t = (transforms.ToTensor()(mp).unsqueeze(0).to(args.device) > 0.5)
                 ml = F.interpolate(m_t.to(dtype), size=latents.shape[-2:], mode="nearest")
                 ml = (ml > 0.5).to(dtype)
