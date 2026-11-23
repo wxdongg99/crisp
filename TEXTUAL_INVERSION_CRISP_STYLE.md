@@ -189,3 +189,27 @@ Result directory:
 
 The inpainting path now matches the intended protocol; current content is still
 weak and needs prompt/strength/mask tuning.
+
+## CFG sweep for token inpainting
+
+Source: normal fabric image; mask: pattern16 real line defect; multi4 token;
+SDXL inpaint at 1024, 20 steps, strength 0.9, seed 0.
+
+| CFG | background MAE | observation |
+|---:|---:|---|
+| 5.0 | 0.43 | almost no visible edit |
+| 7.5 | 0.41 | faint line |
+| 10 | 0.50 | line response stronger |
+| 12 | 0.51 | clearest line, still an artifact |
+| 15 | 0.61 | stronger but starts edge artifact |
+| 20 | 0.95 | strong line/edge artifact, background drifts |
+
+Comparison:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_mask/
+  token_multi4_inpaint_cfg_high_sweep.jpg
+```
+
+CFG can be raised, but it strengthens the line artifact rather than producing a
+plausible defect. Content quality is still the blocker.
