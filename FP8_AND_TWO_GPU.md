@@ -76,3 +76,35 @@ Montage:
 All three seeds produce coherent dark stain-like regions inside the mask while
 preserving background. FP8 inference is therefore validated visually on PixArt
 1024 mask.
+
+## FP8 training attempt on 4090
+
+A 5-step FP8 training smoke on the idle GPU0 reached torchao's float8 linear
+path and failed:
+
+```text
+RuntimeError: Unable to cast (bf16 tensor, 0.) to Tensor
+at torchao/float8/float8_linear.py: manual_float8_matmul_with_args_in_float8
+```
+
+This is a torchao/Ada FP8 training limitation, not our SDXL TI logic. FP8
+weight-only inference works; FP8 training is not validated on the 4090.
+
+## Per-pattern LFP v3 loss
+
+`textual_inversion_sdxl.py` now supports:
+
+```text
+--mask-project lfp_v3
+```
+
+The LFP v3 mask is used only as the **latent loss support**, not as a generation
+mask. pattern17 training is running with:
+
+```text
+6 original images × 4 data_enhance variants
+4800 steps (6 × 800)
+lr=5e-3
+mask-project=lfp_v3
+placeholder=<pattern17>
+```

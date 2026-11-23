@@ -101,6 +101,7 @@ def main():
     p.add_argument("--crops-per-image", type=int, default=4)
     p.add_argument("--mask-image", nargs="*", default=[])
     p.add_argument("--mask-loss", action="store_true")
+    p.add_argument("--mask-project", default="raw", choices=["raw", "lfp_v3"])
     p.add_argument("--ema-decay", type=float, default=0.999)
     p.add_argument("--prompt", default="a photo of <anomaly>")
     p.add_argument("--placeholder", default="<anomaly>")
@@ -169,9 +170,17 @@ def main():
         for _, m in targets:
             if m is None:
                 mask_latents.append(None)
-            else:
-                ml = F.interpolate(m.to(dtype), size=(latents_list[0].shape[-2], latents_list[0].shape[-1]), mode="nearest")
-                mask_latents.append((ml > 0.5).to(dtype))
+                continue
+            if args.mask_project == "lfp_v3":
+                from highres.lfp_mask import lfp_pixel_mask_v3
+                from torchvision.transforms import ToPILImage
+                # m is [1,1,S,S] binary; project with the frozen SDXL VAE.
+                m_pil = ToPILImage()((m[0] * 255).to(torch.uint8).cpu())
+                m_pil = lfp_pixel_mask_v3(m_pil, vae, vae.config.scaling_factor, 8)
+                mt = transforms.ToTensor()(m_pil).unsqueeze(0).to(args.device)
+                m = (mt > 0.5).to(dtype)
+            ml = F.interpolate(m.to(dtype), size=(latents_list[0].shape[-2], latents_list[0].shape[-1]), mode="nearest")
+            mask_latents.append((ml > 0.5).to(dtype))
     print(f"[TI-SDXL] targets={len(latents_list)} from {len(args.image)} image(s) mask_loss={args.mask_loss}")
     add_time_ids = torch.tensor([[args.size, args.size, 0, 0, args.size, args.size]],
                                 device=args.device, dtype=dtype)
@@ -215,7 +224,7 @@ def main():
         "prompt": args.prompt, "placeholder": args.placeholder, "steps": args.steps,
         "lr": args.lr, "images": args.image, "crops_per_image": args.crops_per_image,
         "ema_decay": args.ema_decay, "seed": args.seed, "size": args.size,
-        "targets": len(latents_list), "mask_loss": args.mask_loss, "mask_image": args.mask_image,
+        "targets": len(latents_list), "mask_loss": args.mask_loss, "mask_project": args.mask_project, "mask_image": args.mask_image,
         "note": "only placeholder rows in both SDXL text encoders are trainable",
     }, indent=2))
     print(f"[TI-SDXL] wrote {out}")
