@@ -1564,7 +1564,8 @@ class LatentDiffusion(DDPM):
     #@torch.no_grad()
     def log_images(self, batch, N=8, n_row=4, sample=True, unconditional_only=False,ddim_steps=200, ddim_eta=1., return_keys=None,
                    quantize_denoised=True, inpaint=True, plot_denoise_rows=False, plot_progressive_rows=False,
-                   plot_diffusion_rows=False,adaptive_mask=False, downsample_method="tbf", **kwargs):
+                   plot_diffusion_rows=False,adaptive_mask=False, downsample_method="tbf",
+                   inpaint_cfg_scale=1.0, **kwargs):
         use_ddim = ddim_steps is not None
         log = dict()
         z, c,total_dict, x, xrec, xc = self.get_input(batch, self.first_stage_key,
@@ -1655,11 +1656,18 @@ class LatentDiffusion(DDPM):
         if inpaint:
             # make a simple center square
             b, h, w = z.shape[0], z.shape[2], z.shape[3]
+            _inpaint_cfg_kwargs = {}
+            if float(inpaint_cfg_scale) > 1.0:
+                # Pure unconditional branch: empty prompt, no class/bg/PSP.
+                uc, _ = self.get_learned_conditioning(len(c) * [""])
+                _inpaint_cfg_kwargs["unconditional_guidance_scale"] = float(inpaint_cfg_scale)
+                _inpaint_cfg_kwargs["unconditional_conditioning"] = uc
 
             with self.ema_scope("Plotting Inpaint"):
                 samples, z_denoise_row = self.sample_log(cond=c,batch_size=N,ddim=use_ddim, eta=ddim_eta,ddim_steps=ddim_steps,
                                                              x0=z[:N], mask=mask,embedding_position=total_dict['position'],adaptive_mask=adaptive_mask,
-                                                             embedding_manager=self.cond_stage_model,decoder=self.decode_first_stage)
+                                                             embedding_manager=self.cond_stage_model,decoder=self.decode_first_stage,
+                                                             **_inpaint_cfg_kwargs)
                 # if adaptive_mask:
                 #     # samples, z_denoise_row = self.sample_log(cond=c,batch_size=N,ddim=use_ddim, eta=ddim_eta,ddim_steps=ddim_steps,
                 #     #                                          x0=z[:N], mask=mask,embedding_position=total_dict['position'],adaptive_mask=adaptive_mask,

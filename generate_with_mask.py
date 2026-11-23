@@ -129,6 +129,11 @@ if __name__ == "__main__":
         choices=["rotate", "random"],
         help="Normal base-image selection: uniform rotation (default) or "
              "random sampling with replacement.")
+    parser.add_argument(
+        "--inpaint_cfg_scale", type=float, default=3.0,
+        help="Classifier-free guidance scale for inpainting. "
+             "1.0 disables CFG; default 3.0 matches the CRISP Stage-A "
+             "reference.")
     # setup_seed(42)
     opt = parser.parse_args()
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune-encoder+embedding.yaml")
@@ -165,7 +170,12 @@ if __name__ == "__main__":
                 with model.ema_scope():
                     mask=batch['mask'].cpu()
                     ori_images=batch['image'].permute(0,3,1,2)
-                    images=model.log_images(batch,sample=False,inpaint=True,unconditional_only=True,adaptive_mask=opt.adaptive_mask,downsample_method=opt.downsample_method)
+                    images=model.log_images(
+                        batch, sample=False, inpaint=True,
+                        unconditional_only=True,
+                        adaptive_mask=opt.adaptive_mask,
+                        downsample_method=opt.downsample_method,
+                        inpaint_cfg_scale=opt.inpaint_cfg_scale)
                     imgs=images['samples_inpainting'].cpu()
                     recon_image=images['reconstruction']
                     for i in range(len(imgs)):
