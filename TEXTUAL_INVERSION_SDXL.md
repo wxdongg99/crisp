@@ -92,3 +92,28 @@ Output:
 
 This also serves as the save/reload check: the generated images use only the
 serialized token vectors, not the training process state.
+
+## Masked latent loss and training budget
+
+`--mask-loss` now multiplies the per-pixel latent denoising error by the
+downsampled latent mask and normalizes by the mask area:
+
+```text
+loss = sum((pred - noise)^2 * latent_mask)
+       / (sum(latent_mask) * channels)
+```
+
+Without `--mask-loss` the loss is the ordinary full-latent MSE.
+
+Training budget correction: every target crop must be seen at least 800 times.
+For the 8 pattern16 anomaly crops this means:
+
+```text
+8 images × 800 views = 6400 optimizer steps
+batch size = 1
+lr = 5e-3
+EMA = 0.999
+```
+
+The earlier 300-step run is only a short smoke and should not be used for
+quality conclusions.
