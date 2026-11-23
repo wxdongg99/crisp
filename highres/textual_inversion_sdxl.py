@@ -103,7 +103,19 @@ def load_dynamic_pair(path, mask_path, size, device, rng):
     assert img_t.shape[-2:] == mask_t.shape[-2:], "image/mask spatial mismatch"
     return img_t, mask_t
 
-def _encode_with_token(text_encoder, ids, token_id, vec):
+def _expand_mask(mask, ids, token_id, n_vec):
+    out = mask.clone()
+    for b in range(out.shape[0]):
+        pos = (ids[b] == token_id).nonzero(as_tuple=False).flatten()
+        if pos.numel() == 0:
+            continue
+        p = int(pos[0])
+        out[b] = torch.cat([out[b, :p], torch.ones(n_vec, device=out.device, dtype=out.dtype),
+                            out[b, p + 1:]], dim=0)[:out.shape[1]]
+    return out
+
+
+def _encode_with_token(text_encoder, ids, token_id, vec, attention_mask=None):
     """Run frozen CLIP and replace one placeholder row with N learned vectors."""
     emb_module = text_encoder.text_model.embeddings
     vec = vec
@@ -122,19 +134,25 @@ def _encode_with_token(text_encoder, ids, token_id, vec):
 
     handle = emb_module.register_forward_hook(hook)
     try:
-        out = text_encoder(ids, output_hidden_states=True)
+        if attention_mask is not None:
+            attention_mask = _expand_mask(attention_mask, ids, token_id, n_vec)
+        out = text_encoder(ids, attention_mask=attention_mask, output_hidden_states=True)
     finally:
         handle.remove()
     return out
 
 def get_prompt_embeds(text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt,
                       token_id, token_id_2, vec1, vec2, device):
-    ids = tokenizer(prompt, padding="max_length", max_length=tokenizer.model_max_length,
-                    truncation=True, return_tensors="pt").input_ids.to(device)
-    ids2 = tokenizer_2(prompt, padding="max_length", max_length=tokenizer_2.model_max_length,
-                       truncation=True, return_tensors="pt").input_ids.to(device)
-    e1 = _encode_with_token(text_encoder, ids, token_id, vec1)
-    e2 = _encode_with_token(text_encoder_2, ids2, token_id_2, vec2)
+    tok = tokenizer(prompt, padding="max_length", max_length=tokenizer.model_max_length,
+                    truncation=True, return_tensors="pt")
+    tok2 = tokenizer_2(prompt, padding="max_length", max_length=tokenizer_2.model_max_length,
+                       truncation=True, return_tensors="pt")
+    ids = tok.input_ids.to(device)
+    ids2 = tok2.input_ids.to(device)
+    mask = tok.attention_mask.to(device)
+    mask2 = tok2.attention_mask.to(device)
+    e1 = _encode_with_token(text_encoder, ids, token_id, vec1, mask)
+    e2 = _encode_with_token(text_encoder_2, ids2, token_id_2, vec2, mask2)
     prompt_embeds = torch.cat([e1.hidden_states[-2], e2.hidden_states[-2]], dim=-1)
     pooled = e2.text_embeds
     return prompt_embeds, pooled

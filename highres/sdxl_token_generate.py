@@ -55,6 +55,17 @@ def main():
     tid1 = pipe.tokenizer.convert_tokens_to_ids(placeholder)
     tid2 = pipe.tokenizer_2.convert_tokens_to_ids(placeholder)
 
+    def expand_mask(mask, ids, token_id, n_vec):
+        out = mask.clone()
+        for b in range(out.shape[0]):
+            pos = (ids[b] == token_id).nonzero(as_tuple=False).flatten()
+            if pos.numel() == 0:
+                continue
+            p = int(pos[0])
+            out[b] = torch.cat([out[b, :p], torch.ones(n_vec, device=out.device, dtype=out.dtype),
+                                out[b, p + 1:]], dim=0)[:out.shape[1]]
+        return out
+
     def install_hook(encoder, token_id, vec):
         def hook(module, args, kwargs, output):
             ids = kwargs.get("input_ids") if kwargs else None
@@ -69,7 +80,15 @@ def main():
                 v = vec.to(device=o.device, dtype=o.dtype)
                 o[b] = torch.cat([o[b, :p], v, o[b, p + 1:]], dim=0)[:o.shape[1]]
             return o
-        return encoder.text_model.embeddings.register_forward_hook(hook, with_kwargs=True)
+        emb_handle = encoder.text_model.embeddings.register_forward_hook(hook, with_kwargs=True)
+        def mask_pre_hook(module, hargs, hkwargs):
+            ids = hkwargs.get("input_ids")
+            mask = hkwargs.get("attention_mask")
+            if ids is not None and mask is not None:
+                hkwargs["attention_mask"] = expand_mask(mask, ids, token_id, vec.shape[0])
+            return hargs, hkwargs
+        mask_handle = encoder.register_forward_pre_hook(mask_pre_hook, with_kwargs=True)
+        return emb_handle, mask_handle
 
     h1 = install_hook(pipe.text_encoder, tid1, vec1)
     h2 = install_hook(pipe.text_encoder_2, tid2, vec2)
@@ -96,7 +115,9 @@ def main():
         records.append({"file": str(img_dir / name), "seed": seed,
                         "resolution": args.resolution, "output_size": list(image.size)})
         print(f"[SDXL-TI-gen] {i+1}/{args.num_images}")
-    h1.remove(); h2.remove()
+    for handles in (h1, h2):
+        for h in handles:
+            h.remove()
     manifest = {
         "model": args.model, "embedding": args.embedding, "prompt": prompt,
         "placeholder": placeholder, "num_vectors": num_vectors, "resolution": args.resolution,

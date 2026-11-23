@@ -75,3 +75,33 @@ Output:
 /media/cc/U2-Server/crisp-storage/textual_inversion_runs/
   sdxl_token_pattern16_multi4_dynamic_4800/
 ```
+
+## Attention mask handling for multi-vector expansion
+
+new_crisp BERT path does **not** pass an attention mask. For SDXL, the pipeline
+normally does, so a token-row hook alone would leave the mask unexpanded.
+
+We now expand the mask together with the token block:
+
+```python
+mask_new = cat([mask[:p], ones(n_vectors), mask[p+1:]])[:77]
+```
+
+Training: `_encode_with_token` builds and passes the expanded mask to both CLIP
+encoders.
+
+Generation: a forward pre-hook on each text encoder expands
+`attention_mask` before the encoder runs; the embedding hook expands the token
+rows by the same `n_vectors`.
+
+Smoke tested:
+
+```text
+training 3 steps + 5-step generation from the saved 4-vector embedding
+```
+
+Current 4800-step run:
+
+```text
+sdxl_token_pattern16_multi4_mask_4800
+```
