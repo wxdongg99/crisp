@@ -78,7 +78,7 @@ def lfp_pixel_mask(mask_pil: Image.Image, vae, scale_factor: float, vae_scale: i
 
 def lfp_pixel_mask_v3(mask_pil: Image.Image, vae, scale_factor: float,
                       vae_scale: int = 8, max_iters: int = 64) -> Image.Image:
-    """LFP v3: max-pool the input mask, then dilate to the v1 LFP area.
+    """LFP v3: max-pool the input mask, then nearest-point dilate to the v1 LFP area.
 
     The v1 mask is used only as an area target. The support is built from the
     input mask with max-pooling, which avoids v1's VAE-edge artefacts.
@@ -92,16 +92,13 @@ def lfp_pixel_mask_v3(mask_pil: Image.Image, vae, scale_factor: float,
     pooled = F.max_pool2d((m >= 0.5).float(), kernel_size=vae_scale, stride=vae_scale)
     base = F.interpolate(pooled, size=(h, w), mode="nearest")[0, 0] >= 0.5
 
-    # Smooth isotropic dilation via distance transform; choose the radius
-    # whose support area is closest to the v1 LFP area.
-    dist = distance_transform_edt(~base.cpu().numpy())
-    best = base.cpu().numpy()
-    best_delta = abs(int(best.sum()) - target)
-    for r in np.arange(0.5, max(dist.max(), 1.0), 0.5):
-        cand = dist <= r
-        delta = abs(int(cand.sum()) - target)
-        if delta < best_delta:
-            best_delta = delta
-            best = cand
-    out = (best.astype(np.uint8) * 255)
+    # Exact nearest-point dilation: rank every pixel by distance to the
+    # max-pooled support and take the closest `target` pixels. This is not a
+    # blur/Gaussian dilation; it is a distance-ordered fill to v1 area.
+    dist = distance_transform_edt(~base.cpu().numpy()).ravel()
+    target = min(int(target), dist.size)
+    nearest = np.argpartition(dist, target - 1)[:target]
+    out = np.zeros(dist.shape, dtype=np.uint8)
+    out[nearest] = 255
+    out = out.reshape(base.shape)
     return Image.fromarray(out, mode="L")

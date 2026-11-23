@@ -66,7 +66,7 @@ User-requested v3:
 
 1. max-pool the input mask at the latent stride;
 2. upsample the pooled support back to pixels;
-3. dilate with a distance-transform disk until the area matches v1 LFP;
+3. rank pixels by Euclidean distance to the max-pooled support and add the nearest pixels until the area exactly matches v1 LFP;
 4. use this as the SDXL mask support.
 
 Implementation: `highres/lfp_mask.py::lfp_pixel_mask_v3`.
@@ -77,7 +77,7 @@ Implementation: `highres/lfp_mask.py::lfp_pixel_mask_v3`.
 |---|---:|---:|---|
 | raw input | 4,716 | 1.00 | almost unchanged |
 | LFP v1 | 27,072 | 1.61 | strong border artifacts |
-| LFP v3 | 26,944 | 1.72 | smooth support, but bright jagged band inside mask |
+| LFP v3 | 26,944 | 1.72 | nearest-point support, but bright jagged band inside mask |
 
 Comparison:
 
@@ -111,3 +111,17 @@ Result:
 The composite confines the edit to the thin original defect line instead of the
 whole v3 band, but the generated content is still a bright line-like artifact,
 not a plausible fabric defect.
+
+## v3 correction
+
+The v3 expansion is **not** blur/Gaussian "smooth dilation". It is an exact
+nearest-point dilation:
+
+```python
+dist = distance_transform_edt(~base)
+nearest = np.argpartition(dist.ravel(), target - 1)[:target]
+```
+
+i.e. rank all pixels by distance to the max-pooled mask and add the closest
+pixels until the support area equals v1 LFP. The earlier "smooth" wording was
+misleading.
