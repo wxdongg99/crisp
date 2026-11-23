@@ -173,3 +173,22 @@ Generation:
 Result: coherent woven fabric texture, but no clear defect concept. The token
 still does not learn a transferable anomaly; this is a negative result for the
 plain SDXL TI route.
+
+## Image/mask augmentation sync check
+
+The existing `utils.random_transform` receives both tensors:
+
+```python
+img_t, mask_t = _CRISP_DATA_ENHANCE(img_t, mask_t)
+```
+
+Its flips use the same random draw for image and target, `RandomRotation` uses
+the same angle for both, and the mask-bbox crop is applied to the same crop box
+for image and mask.
+
+Visual check:
+
+```text
+/media/cc/U2-Server/crisp-storage/textual_inversion_runs/
+  aug_mask_sync_check.jpg
+```
