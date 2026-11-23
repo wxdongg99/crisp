@@ -59,3 +59,33 @@ naive LFP: spurious border support, not usable yet
 
 Next: calibrate LFP per-channel thresholds/trim for SDXL VAE, or use a
 pixel-space LFP-like morphology rule instead of direct VAE-space Otsu.
+
+## LFP mask v3
+
+User-requested v3:
+
+1. max-pool the input mask at the latent stride;
+2. upsample the pooled support back to pixels;
+3. dilate with a distance-transform disk until the area matches v1 LFP;
+4. use this as the SDXL mask support.
+
+Implementation: `highres/lfp_mask.py::lfp_pixel_mask_v3`.
+
+### Real thin-defect comparison
+
+| mask | area (512²) | background MAE | output |
+|---|---:|---:|---|
+| raw input | 4,716 | 1.00 | almost unchanged |
+| LFP v1 | 27,072 | 1.61 | strong border artifacts |
+| LFP v3 | 26,944 | 1.72 | smooth support, but bright jagged band inside mask |
+
+Comparison:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_lfp/lfp_v3b_comparison.jpg
+```
+
+Conclusion: v3 removes v1's border-support artifacts and matches v1's area,
+but the SDXL inpaint result inside the band is still a bright artefact, not a
+plausible defect. This suggests the problem is not only mask support but also
+the model/prompt conditioning for thin defects.

@@ -14,7 +14,7 @@ from PIL import Image
 from torchvision import transforms
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from highres.lfp_mask import lfp_pixel_mask
+from highres.lfp_mask import lfp_pixel_mask, lfp_pixel_mask_v3
 
 
 def load_image(path, size):
@@ -38,7 +38,7 @@ def main():
     p.add_argument("--image", required=True)
     p.add_argument("--mask-box", nargs=4, type=float, default=[0.35, 0.35, 0.65, 0.65])
     p.add_argument("--mask-image", default="", help="optional real defect mask image")
-    p.add_argument("--mask-project", default="raw", choices=["raw", "lfp"])
+    p.add_argument("--mask-project", default="raw", choices=["raw", "lfp", "lfp_v3"])
     p.add_argument("--prompt", default="a realistic macro photograph of natural beige linen fabric")
     p.add_argument("--negative_prompt", default="blurry, low resolution, jpeg artifacts, text, watermark")
     p.add_argument("--embedding", default="", help="optional token embedding .pt from sdxl token TI")
@@ -99,12 +99,15 @@ def main():
         pipe.enable_model_cpu_offload()
     else:
         pipe = pipe.to("cuda")
-    if args.mask_project == "lfp":
+    if args.mask_project in ("lfp", "lfp_v3"):
         vae = pipe.vae
         dev = next(vae.parameters()).device
         if dev.type != "cpu":
             vae.to("cpu")
-        mask = lfp_pixel_mask(mask, vae, pipe.vae.config.scaling_factor, pipe.vae_scale_factor)
+        if args.mask_project == "lfp":
+            mask = lfp_pixel_mask(mask, vae, pipe.vae.config.scaling_factor, pipe.vae_scale_factor)
+        else:
+            mask = lfp_pixel_mask_v3(mask, vae, pipe.vae.config.scaling_factor, pipe.vae_scale_factor)
         if dev.type != "cpu":
             vae.to(dev)
         print(f"[SDXL-mask] LFP projected mask saved")

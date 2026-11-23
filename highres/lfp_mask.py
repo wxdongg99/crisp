@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
+from scipy.ndimage import distance_transform_edt
 
 
 def _otsu(x: np.ndarray) -> float:
@@ -73,3 +74,34 @@ def lfp_pixel_mask(mask_pil: Image.Image, vae, scale_factor: float, vae_scale: i
     latent = _lfp_latent(m, vae, scale_factor, th, tw)
     pix = F.interpolate(latent, size=(h, w), mode="nearest")[0, 0].cpu().numpy()
     return Image.fromarray((pix * 255).astype(np.uint8), mode="L")
+
+
+def lfp_pixel_mask_v3(mask_pil: Image.Image, vae, scale_factor: float,
+                      vae_scale: int = 8, max_iters: int = 64) -> Image.Image:
+    """LFP v3: max-pool the input mask, then dilate to the v1 LFP area.
+
+    The v1 mask is used only as an area target. The support is built from the
+    input mask with max-pooling, which avoids v1's VAE-edge artefacts.
+    """
+    w, h = mask_pil.size
+    v1 = lfp_pixel_mask(mask_pil, vae, scale_factor, vae_scale)
+    target = int((np.asarray(v1) > 127).sum())
+    m = torch.from_numpy(np.asarray(mask_pil.convert("L"))).float()[None, None] / 255.0
+
+    # max-pool at latent stride, then upsample the latent support to pixels
+    pooled = F.max_pool2d((m >= 0.5).float(), kernel_size=vae_scale, stride=vae_scale)
+    base = F.interpolate(pooled, size=(h, w), mode="nearest")[0, 0] >= 0.5
+
+    # Smooth isotropic dilation via distance transform; choose the radius
+    # whose support area is closest to the v1 LFP area.
+    dist = distance_transform_edt(~base.cpu().numpy())
+    best = base.cpu().numpy()
+    best_delta = abs(int(best.sum()) - target)
+    for r in np.arange(0.5, max(dist.max(), 1.0), 0.5):
+        cand = dist <= r
+        delta = abs(int(cand.sum()) - target)
+        if delta < best_delta:
+            best_delta = delta
+            best = cand
+    out = (best.astype(np.uint8) * 255)
+    return Image.fromarray(out, mode="L")
