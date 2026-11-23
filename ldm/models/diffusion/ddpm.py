@@ -1661,8 +1661,9 @@ class LatentDiffusion(DDPM):
             b, h, w = z.shape[0], z.shape[2], z.shape[3]
             _inpaint_cfg_kwargs = {}
             if float(inpaint_cfg_scale) > 1.0:
-                # Pure unconditional branch: empty prompt, no class/bg/PSP.
-                uc, _ = self.get_learned_conditioning(len(c) * [""])
+                # Pure unconditional branch: bypass the embedding manager
+                # entirely (same as CRISP's cond_stage_model.encode([""])).
+                uc, _ = self.cond_stage_model.encode(len(c) * [""])
                 _inpaint_cfg_kwargs["unconditional_guidance_scale"] = float(inpaint_cfg_scale)
                 _inpaint_cfg_kwargs["unconditional_conditioning"] = uc
 
