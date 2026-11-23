@@ -157,3 +157,19 @@ precomputes a fixed 24-pair set. The 4800-step budget is:
 ```
 
 Only a thin-mask safety fallback is added if rotation makes a mask empty.
+
+## Dynamic pattern16 result (4800 steps)
+
+Reused `utils.random_transform` dynamically, 6 source images × 800 views,
+lr=5e-3, mask-loss. Training finished at step 4800.
+
+Generation:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_token/
+  pattern16_dynamic_1024/
+```
+
+Result: coherent woven fabric texture, but no clear defect concept. The token
+still does not learn a transferable anomaly; this is a negative result for the
+plain SDXL TI route.
