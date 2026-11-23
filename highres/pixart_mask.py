@@ -39,6 +39,8 @@ def main():
     p.add_argument("--model", default="/media/cc/U2-Server/crisp-storage/models/pixart_sigma_1024")
     p.add_argument("--image", required=True)
     p.add_argument("--mask-box", nargs=4, type=float, default=[0.35, 0.35, 0.65, 0.65])
+    p.add_argument("--mask-image", default="", help="optional real/derived mask image")
+    p.add_argument("--composite-mask", default="", help="optional fine mask for final compositing")
     p.add_argument("--prompt", required=True)
     p.add_argument("--negative_prompt", default="blurry, low resolution, jpeg artifacts, text, watermark")
     p.add_argument("--embedding", default="")
@@ -69,9 +71,12 @@ def main():
     img_dir.mkdir(parents=True, exist_ok=True)
     source_pil = Image.open(args.image).convert("RGB")
     src_t = load_image(args.image, args.resolution).unsqueeze(0).to("cuda", dtype)
-    mask_pil = make_mask(args.resolution, args.mask_box)
+    if args.mask_image:
+        mask_pil = Image.open(args.mask_image).convert("L").resize((args.resolution, args.resolution), Image.Resampling.NEAREST)
+    else:
+        mask_pil = make_mask(args.resolution, args.mask_box)
     source_pil.resize((args.resolution, args.resolution)).save(out / "source.png")
-    mask_pil.save(out / "mask.png")
+    mask_pil.save(out / "mask_raw.png")
 
     start = time.time()
     pipe = PixArtSigmaPipeline.from_pretrained(args.model, torch_dtype=dtype)
@@ -164,6 +169,11 @@ def main():
     mask_np = np.asarray(mask_pil) > 127
     src_np = np.asarray(source_pil.resize((args.resolution, args.resolution))).astype(np.float32)
     for i in range(args.num_images):
+        # Reset the scheduler state for each independent image.
+        scheduler.set_timesteps(args.steps)
+        timesteps = scheduler.timesteps
+        start_idx = min(int(args.steps * (1.0 - args.strength)), len(timesteps) - 1)
+        timesteps = timesteps[start_idx:]
         seed = args.seed + i
         gen = torch.Generator(device="cpu").manual_seed(seed)
         noise = torch.randn(src_lat.shape, generator=gen, device="cpu").to(device, dtype)
@@ -192,16 +202,24 @@ def main():
         image = pipe.image_processor.postprocess(image, output_type="pil")[0]
         name = f"p00_{i:04d}.png"
         image.save(img_dir / name)
+        composite_path = ""
+        if args.composite_mask:
+            cm = Image.open(args.composite_mask).convert("L").resize((args.resolution, args.resolution), Image.Resampling.NEAREST)
+            comp = Image.composite(image.resize((args.resolution, args.resolution)), source_pil.resize((args.resolution, args.resolution)), cm)
+            composite_path = str(out / f"composite_{i:04d}.png")
+            comp.save(composite_path)
         arr = np.asarray(image.resize((args.resolution, args.resolution))).astype(np.float32)
         bg = np.abs(arr[~mask_np] - src_np[~mask_np]).mean()
         records.append({"file": str(img_dir / name), "seed": seed,
-                        "background_mae_outside_mask": round(float(bg), 3), "output_size": list(image.size)})
+                        "background_mae_outside_mask": round(float(bg), 3), "output_size": list(image.size),
+                        "composite": composite_path})
         print(f"[PixArt-mask] {i+1}/{args.num_images} bg_mae={bg:.2f}")
     for h in hooks:
         h.remove()
     (out / "manifest.json").write_text(json.dumps({
         "model": args.model, "image": args.image, "mask_box": args.mask_box,
         "prompt": args.prompt, "negative_prompt": args.negative_prompt,
+        "mask_image": args.mask_image, "composite_mask": args.composite_mask,
         "embedding": args.embedding, "resolution": args.resolution,
         "steps": args.steps, "strength": args.strength, "seed": args.seed,
         "records": records,

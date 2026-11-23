@@ -70,7 +70,7 @@ Current evidence:
 - [x] LFP v3 maxpool + exact nearest-point dilation to v1 area
 - [x] LFP v3 cached area-ratio speedup: 5.2 s first / 0.083 s cached
 - [x] Fine-mask composite option (`--composite-mask`)
-- [~] SDXL mask content quality: still bright artifacts, not defects
+- [~] SDXL mask content quality: bright artifacts; PixArt fine-mask composite is subtler
 - [ ] SDXL 1024→2048 high-res fix baseline
 
 ## P4. PixArt baseline and mask
@@ -83,6 +83,7 @@ Current evidence:
 - [x] FP8 weight-only inference on Python 3.12/torchao 0.7
 - [x] PixArt 1024 CFG FP8 multi-seed 0/1/2: coherent stains
 - [x] Fixed-seed SDXL-vs-PixArt 1024 mask comparison: PixArt better for stain
+- [x] Mask-conditioned fine-defect generation: PixArt raw/LFP v3 + fine-mask composite
 - [ ] PixArt per-pattern token TI (not attempted; current route is SDXL)
 - [~] Two-device placement `--tx-device/--vae-device` code exists, not benchmarked
 
