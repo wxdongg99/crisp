@@ -75,3 +75,38 @@ driver 580.126.09 / CUDA 13.0
 - GPUs are shared; check `nvidia-smi` before dispatching.
 - The env is an overlay on Onevision-2's Python 3.10/torch install; do not
   upgrade the base environment in place.
+
+## Model staging (in progress)
+
+Started from local workstation:
+
+```text
+sdxl-base-1.0       -> /data/solo/wxd/models/sdxl-base-1.0
+pixart_sigma_1024   -> /data/solo/wxd/models/pixart_sigma_1024
+pixart_sigma_2k     -> /data/solo/wxd/models/pixart_sigma_2k
+```
+
+Also copied:
+
+```text
+zju_leaper_native512 data
+generated_mask/fabric
+pattern16 multi4 token
+latest project code
+```
+
+Observed upload rate to the B300 is only ~1.5–1.9 MB/s per stream, so the two
+large model transfers take hours. A queued launcher waits for the model files
+and then starts:
+
+```text
+GPU0: SDXL 2048 DDIM inpainting + token
+GPU1: PixArt 2K 2048 CFG4.5 inpainting
+```
+
+Launcher:
+
+```text
+/data/solo/wxd/run_2048_b300.sh
+/data/solo/wxd/logs/run_2048_launcher.log
+```
