@@ -1069,12 +1069,16 @@ class LatentDiffusion(DDPM):
               f"init_from={init_from}, Stage-A={embed_path}")
 
     def enable_stage_b_generation(self, stage_a_ckpt_root, stage_b_ckpt_root,
-                                  alpha=1.0):
-        """Load frozen Stage-A and trained Stage-B for BPRC inference."""
+                                  cfg_b=1.0):
+        """Load frozen Stage-A and trained Stage-B for BPRC inference.
+
+        ``cfg_b`` is the residual gain in ``eps = eps_A + cfg_b * eps_R``
+        (CRISP's Stage-B cfg), not a second unconditional CFG branch.
+        """
         self.enable_stage_b_residual(
             stage_a_ckpt_root=stage_a_ckpt_root,
             init_from="random",
-            alpha=float(alpha),
+            alpha=float(cfg_b),
         )
         bdir = os.path.join(stage_b_ckpt_root, "checkpoints")
         if not os.path.isdir(bdir):
@@ -1095,7 +1099,7 @@ class LatentDiffusion(DDPM):
             self._stage_a_embedding_manager.eval()
         self.stage_b_generation_enabled = True
         print(f"[Stage-B generation] A={stage_a_ckpt_root} "
-              f"B={stage_b_ckpt_root} alpha={alpha}")
+              f"B={stage_b_ckpt_root} cfg_b={cfg_b}")
 
     def p_losses_stage_b(self, x_start, cond_a, cond_b, t,
                          mask=None, noise=None):

@@ -130,10 +130,20 @@ if __name__ == "__main__":
         help="Normal base-image selection: uniform rotation (default) or "
              "random sampling with replacement.")
     parser.add_argument(
+        "--cfg_a", type=float, default=None,
+        help="Stage-A CFG scale. Default: 3.0 for Stage-A generation; "
+             "Stage-B generation currently requires 1.0.")
+    parser.add_argument(
+        "--cfg_b", type=float, default=None,
+        help="Stage-B residual gain (CRISP cfg_b): "
+             "eps = eps_A + cfg_b * eps_R. Default: 1.0.")
+    # Backward-compatible aliases; prefer --cfg_a / --cfg_b.
+    parser.add_argument(
         "--inpaint_cfg_scale", type=float, default=None,
-        help="Classifier-free guidance scale for inpainting. "
-             "Default: 3.0 for Stage-A, 1.0 for Stage-B. "
-             "1.0 disables CFG.")
+        help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--bprc_alpha", type=float, default=None,
+        help=argparse.SUPPRESS)
     parser.add_argument(
         "--stage_a_root", type=str, default="logs/anomaly-checkpoints",
         help="Stage-A run root containing checkpoints/ (default: logs path).")
@@ -141,16 +151,16 @@ if __name__ == "__main__":
         "--stage_b_root", type=str, default=None,
         help="Optional Stage-B run root. Enables BPRC residual inference.")
     parser.add_argument(
-        "--bprc_alpha", type=float, default=1.0,
-        help="BPRC residual gain for Stage-B inference.")
-    parser.add_argument(
         "--output_suffix", type=str, default="",
         help="Suffix appended to generated_dataset/<sample>/<anomaly>.")
 
     # setup_seed(42)
     opt = parser.parse_args()
-    if opt.inpaint_cfg_scale is None:
-        opt.inpaint_cfg_scale = 1.0 if opt.stage_b_root else 3.0
+    if opt.cfg_a is None:
+        opt.cfg_a = (opt.inpaint_cfg_scale if opt.inpaint_cfg_scale is not None
+                     else (1.0 if opt.stage_b_root else 3.0))
+    if opt.cfg_b is None:
+        opt.cfg_b = opt.bprc_alpha if opt.bprc_alpha is not None else 1.0
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune-encoder+embedding.yaml")
     actual_resume = './models/ldm/text2img-large/model.ckpt'
     model = load_model_from_config(config, actual_resume)
@@ -166,7 +176,7 @@ if __name__ == "__main__":
         model.enable_stage_b_generation(
             stage_a_ckpt_root=opt.stage_a_root,
             stage_b_ckpt_root=opt.stage_b_root,
-            alpha=float(opt.bprc_alpha))
+            cfg_b=float(opt.cfg_b))
     else:
         ckpt = torch.load(os.path.join(_ckpt_dir, "spatial_encoder.pt"))
         model.embedding_manager.spatial_encoder_model.load_state_dict(ckpt)
@@ -198,7 +208,7 @@ if __name__ == "__main__":
                         unconditional_only=True,
                         adaptive_mask=opt.adaptive_mask,
                         downsample_method=opt.downsample_method,
-                        inpaint_cfg_scale=opt.inpaint_cfg_scale)
+                        inpaint_cfg_scale=opt.cfg_a)
                     imgs=images['samples_inpainting'].cpu()
                     recon_image=images['reconstruction']
                     for i in range(len(imgs)):
