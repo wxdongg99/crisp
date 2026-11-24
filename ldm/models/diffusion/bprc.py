@@ -9,7 +9,7 @@ where:
   * eps_A is the frozen principal (Stage-A) prediction;
   * eps_R is the residual (Stage-B) prediction, trained on
     ``noise - stop_gradient(eps_A)`` inside the LFP/defect support;
-  * alpha is the BPRC residual gain (CRISP: ``--bprc_alpha``).
+  * alpha is the BPRC residual gain (CRISP: ``--cfg_b``).
 
 The training-side residual target follows CRISP's objective:
 
@@ -42,7 +42,7 @@ def compose_bprc_residual(eps_a, eps_r, alpha=1.0):
     Args:
         eps_a: frozen Stage-A noise prediction.
         eps_r: Stage-B residual noise prediction.
-        alpha: residual gain (CRISP ``--bprc_alpha``).
+        alpha: residual gain (CRISP ``--cfg_b``).
     """
     if eps_a.shape != eps_r.shape:
         raise ValueError(

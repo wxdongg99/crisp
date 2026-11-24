@@ -10,7 +10,7 @@
 #     --spatial_encoder_embedding --data_enhance \
 #     --mvtec_path /path/to/mvtec --init_word anomaly \
 #     --stage B --stage_a_ckpt_root logs/.../stageA_run \
-#     --stage_b_init_from random --bprc_alpha 1.0 \
+#     --stage_b_init_from random --cfg_b 1.0 \
 #     --override_max_steps 50000
 
 model:

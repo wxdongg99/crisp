@@ -458,7 +458,7 @@ class LatentDiffusion(DDPM):
         self.mask_pool_type='tbf'
         self.stage_b_residual_enabled=False
         self.stage_b_generation_enabled=False
-        self.v10_bprc_alpha=1.0
+        self.cfg_b=1.0
         self._stage_a_embedding_manager=None
         self._stage_b_gen_cond_a=None
         self.num_timesteps_cond = default(num_timesteps_cond, 1)
@@ -1025,7 +1025,7 @@ class LatentDiffusion(DDPM):
             return self.first_stage_model.encode(x)
 
     def enable_stage_b_residual(self, stage_a_ckpt_root, init_from="random",
-                                alpha=1.0):
+                                cfg_b=1.0):
         """Enable CRISP Stage-B residual (BPRC) training.
 
         Frozen Stage-A principal is loaded into a separate embedding manager;
@@ -1062,10 +1062,10 @@ class LatentDiffusion(DDPM):
                 p.requires_grad_(True)
 
         self.stage_b_residual_enabled = True
-        self.v10_bprc_alpha = float(alpha)
+        self.cfg_b = float(cfg_b)
         self.training_stage = "B"
         self.embedding_manager.training_stage = "B"
-        print(f"[Stage-B] residual enabled: alpha={alpha}, "
+        print(f"[Stage-B] residual enabled: cfg_b={cfg_b}, "
               f"init_from={init_from}, Stage-A={embed_path}")
 
     def enable_stage_b_generation(self, stage_a_ckpt_root, stage_b_ckpt_root,
@@ -1078,7 +1078,7 @@ class LatentDiffusion(DDPM):
         self.enable_stage_b_residual(
             stage_a_ckpt_root=stage_a_ckpt_root,
             init_from="random",
-            alpha=float(cfg_b),
+            cfg_b=float(cfg_b),
         )
         bdir = os.path.join(stage_b_ckpt_root, "checkpoints")
         if not os.path.isdir(bdir):
@@ -1600,7 +1600,7 @@ class LatentDiffusion(DDPM):
     def log_images(self, batch, N=8, n_row=4, sample=True, unconditional_only=False,ddim_steps=200, ddim_eta=1., return_keys=None,
                    quantize_denoised=True, inpaint=True, plot_denoise_rows=False, plot_progressive_rows=False,
                    plot_diffusion_rows=False,adaptive_mask=False, downsample_method="tbf",
-                   inpaint_cfg_scale=1.0, **kwargs):
+                   cfg_a=1.0, **kwargs):
         use_ddim = ddim_steps is not None
         log = dict()
         z, c,total_dict, x, xrec, xc = self.get_input(batch, self.first_stage_key,
@@ -1617,10 +1617,10 @@ class LatentDiffusion(DDPM):
                 downsample_method=downsample_method)
             #mask=1-mask
         if getattr(self, 'stage_b_generation_enabled', False) and inpaint:
-            if float(inpaint_cfg_scale) > 1.0:
+            if float(cfg_a) > 1.0:
                 raise ValueError(
                     "Stage-B BPRC generation currently uses "
-                    "inpaint_cfg_scale=1.0; use --bprc_alpha for the "
+                    "cfg_a=1.0; use --cfg_b for the "
                     "residual gain")
             mask_cond = total_dict.get('mask_cond', total_dict.get('mask'))
             name = total_dict.get('name', None)
@@ -1714,17 +1714,17 @@ class LatentDiffusion(DDPM):
             # make a simple center square
             b, h, w = z.shape[0], z.shape[2], z.shape[3]
             _inpaint_cfg_kwargs = {}
-            if float(inpaint_cfg_scale) > 1.0:
+            if float(cfg_a) > 1.0:
                 # Pure unconditional branch: bypass the embedding manager
                 # entirely (same as CRISP's cond_stage_model.encode([""])).
                 uc, _ = self.cond_stage_model.encode(len(c) * [""])
-                _inpaint_cfg_kwargs["unconditional_guidance_scale"] = float(inpaint_cfg_scale)
+                _inpaint_cfg_kwargs["unconditional_guidance_scale"] = float(cfg_a)
                 _inpaint_cfg_kwargs["unconditional_conditioning"] = uc
 
             _apply_orig = self.apply_model
             if getattr(self, 'stage_b_generation_enabled', False):
                 _cond_a = self._stage_b_gen_cond_a
-                _alpha = float(getattr(self, 'v10_bprc_alpha', 1.0))
+                _alpha = float(getattr(self, 'cfg_b', 1.0))
 
                 def _stage_b_apply(x_in, t_in, cond_in, **kw):
                     eps_b = _apply_orig(x_in, t_in, cond_in, **kw)

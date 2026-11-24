@@ -122,8 +122,8 @@ def get_parser(**parser_kwargs):
         help="Initialize Stage-B residual embedding manager randomly or from "
              "the Stage-A checkpoint.")
     parser.add_argument(
-        "--bprc_alpha", type=float, default=1.0,
-        help="BPRC residual gain alpha in eps = eps_A + alpha*eps_R.")
+        "--cfg_b", type=float, default=1.0,
+        help="Stage-B residual gain cfg_b in eps = eps_A + cfg_b*eps_R.")
     parser.add_argument(
         "--stage_a_freeze_class_ti", type=int, default=0,
         help="Stage A: freeze the class TI bank.")
@@ -753,7 +753,7 @@ if __name__ == "__main__":
             model.enable_stage_b_residual(
                 stage_a_ckpt_root=str(opt.stage_a_ckpt_root),
                 init_from=str(getattr(opt, 'stage_b_init_from', 'random')),
-                alpha=float(getattr(opt, 'bprc_alpha', 1.0)))
+                cfg_b=float(getattr(opt, 'cfg_b', 1.0)))
         # Training mask projection (LFP by default).
         model.mask_pool_type = str(getattr(opt, 'mask_pool_type', 'tbf'))
         if int(getattr(opt, 'bg_token_freeze', 0)) and \

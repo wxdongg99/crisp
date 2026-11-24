@@ -43,7 +43,7 @@ CRISP extensions.
   - `training_stage`
   - `mask_pool_type` (default `tbf`)
   - `stage_b_residual_enabled`
-  - `v10_bprc_alpha`
+  - `cfg_b`
   - `_stage_a_embedding_manager`
 - Added LFP mask projection:
   - `_resize_mask_to_latent(...)`
@@ -109,7 +109,7 @@ CRISP extensions.
   - `--override_max_steps`
   - `--stage_a_ckpt_root`
   - `--stage_b_init_from {random,stage_a}`
-  - `--bprc_alpha`
+  - `--cfg_b`
 - Stage-0 wiring: prepare/load bg tokens, freeze TI/PSP, `data.set=bg_only`.
 - Stage-A wiring: freeze bg tokens, train class TI + PSP.
 - Stage-B wiring: load frozen Stage-A embedding manager and enable BPRC
@@ -164,7 +164,7 @@ CUDA_VISIBLE_DEVICES=0 python main.py \
   --stage B \
   --stage_a_ckpt_root <stageA_run> \
   --stage_b_init_from random \
-  --bprc_alpha 1.0 \
+  --cfg_b 1.0 \
   --override_max_steps 50000
 ```
 
