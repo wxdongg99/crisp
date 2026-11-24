@@ -131,11 +131,12 @@ if __name__ == "__main__":
              "random sampling with replacement.")
     parser.add_argument(
         "--cfg_a", type=float, default=None,
-        help="Stage-A CFG scale. Default: 3.0 for Stage-A generation; "
-             "Stage-B generation currently requires 1.0.")
+        help="Stage-A CFG scale. Default: 3.0 for Stage-A; "
+             "default 1.0 for Stage-B unless explicitly set.")
     parser.add_argument(
         "--cfg_b", type=float, default=1.0,
-        help="Stage-B residual gain: eps = eps_A + cfg_b * eps_R. "
+        help="Stage-B residual gain in "
+             "eps = eps_uc + cfg_a*(eps_A-eps_uc) + cfg_b*eps_R. "
              "Only used with --stage_b_root.")
     parser.add_argument(
         "--stage_a_root", type=str, default="logs/anomaly-checkpoints",
@@ -166,6 +167,7 @@ if __name__ == "__main__":
         model.enable_stage_b_generation(
             stage_a_ckpt_root=opt.stage_a_root,
             stage_b_ckpt_root=opt.stage_b_root,
+            cfg_a=float(opt.cfg_a),
             cfg_b=float(opt.cfg_b))
     else:
         ckpt = torch.load(os.path.join(_ckpt_dir, "spatial_encoder.pt"))
