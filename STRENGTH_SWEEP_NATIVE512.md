@@ -26,3 +26,20 @@ Grid:
 Conclusion: CFG=5 is the correct conservative setting, but the token/content
 problem remains. Next is prompt-specific inpainting training/eval with fine
 masks, not raising CFG or steps.
+
+## Mask visualization correction
+
+The first grid overlapped the top-row reference panels with the output rows, so
+the mask looked invisible. The mask itself is valid: 24,600 white pixels,
+a horizontal strip.
+
+Corrected view:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/sdxl_mask/
+  strength_sweep_native512/strength_sweep_maskfix2.jpg
+```
+
+Red = mask-overlay on source; white panel = mask. The mask is a long horizontal
+band, which explains why outputs become a low-frequency horizontal ghost rather
+than a localized defect.
