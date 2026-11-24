@@ -130,12 +130,27 @@ if __name__ == "__main__":
         help="Normal base-image selection: uniform rotation (default) or "
              "random sampling with replacement.")
     parser.add_argument(
-        "--inpaint_cfg_scale", type=float, default=3.0,
+        "--inpaint_cfg_scale", type=float, default=None,
         help="Classifier-free guidance scale for inpainting. "
-             "1.0 disables CFG; default 3.0 matches the CRISP Stage-A "
-             "reference.")
+             "Default: 3.0 for Stage-A, 1.0 for Stage-B. "
+             "1.0 disables CFG.")
+    parser.add_argument(
+        "--stage_a_root", type=str, default="logs/anomaly-checkpoints",
+        help="Stage-A run root containing checkpoints/ (default: logs path).")
+    parser.add_argument(
+        "--stage_b_root", type=str, default=None,
+        help="Optional Stage-B run root. Enables BPRC residual inference.")
+    parser.add_argument(
+        "--bprc_alpha", type=float, default=1.0,
+        help="BPRC residual gain for Stage-B inference.")
+    parser.add_argument(
+        "--output_suffix", type=str, default="",
+        help="Suffix appended to generated_dataset/<sample>/<anomaly>.")
+
     # setup_seed(42)
     opt = parser.parse_args()
+    if opt.inpaint_cfg_scale is None:
+        opt.inpaint_cfg_scale = 1.0 if opt.stage_b_root else 3.0
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune-encoder+embedding.yaml")
     actual_resume = './models/ldm/text2img-large/model.ckpt'
     model = load_model_from_config(config, actual_resume)
@@ -146,15 +161,23 @@ if __name__ == "__main__":
     model = model.to(device)
     sampler = DDIMSampler(model)
     model.prepare_spatial_encoder(optimze_together=True)
-    ckpt = torch.load('logs/anomaly-checkpoints/checkpoints/spatial_encoder.pt')
-    model.embedding_manager.spatial_encoder_model.load_state_dict(ckpt)
-    model.embedding_manager.load('logs/anomaly-checkpoints/checkpoints/embeddings.pt')
+    _ckpt_dir = os.path.join(opt.stage_a_root, "checkpoints")
+    if opt.stage_b_root:
+        model.enable_stage_b_generation(
+            stage_a_ckpt_root=opt.stage_a_root,
+            stage_b_ckpt_root=opt.stage_b_root,
+            alpha=float(opt.bprc_alpha))
+    else:
+        ckpt = torch.load(os.path.join(_ckpt_dir, "spatial_encoder.pt"))
+        model.embedding_manager.spatial_encoder_model.load_state_dict(ckpt)
+        model.embedding_manager.load(os.path.join(_ckpt_dir, "embeddings.pt"))
     dataset = Positive_sample_with_generated_mask(
         opt.data_root, sample_name, anomaly_name, repeats=1, size=256,
         set='train', per_image_tokens=False,
         base_image_mode=opt.base_image_mode)
     dataloader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False, drop_last=True)
-    save_dir = 'generated_dataset/%s/%s' % (sample_name, anomaly_name)
+    save_dir = 'generated_dataset/%s/%s%s' % (
+        sample_name, anomaly_name, opt.output_suffix)
     os.makedirs(save_dir,exist_ok=True)
     os.makedirs(os.path.join(save_dir,'image'), exist_ok=True)
     os.makedirs(os.path.join(save_dir, 'mask'), exist_ok=True)

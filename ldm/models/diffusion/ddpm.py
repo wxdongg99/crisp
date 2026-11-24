@@ -457,8 +457,10 @@ class LatentDiffusion(DDPM):
         self.training_stage='single'
         self.mask_pool_type='tbf'
         self.stage_b_residual_enabled=False
+        self.stage_b_generation_enabled=False
         self.v10_bprc_alpha=1.0
         self._stage_a_embedding_manager=None
+        self._stage_b_gen_cond_a=None
         self.num_timesteps_cond = default(num_timesteps_cond, 1)
         self.scale_by_std = scale_by_std
         assert self.num_timesteps_cond <= kwargs['timesteps']
@@ -1066,6 +1068,35 @@ class LatentDiffusion(DDPM):
         print(f"[Stage-B] residual enabled: alpha={alpha}, "
               f"init_from={init_from}, Stage-A={embed_path}")
 
+    def enable_stage_b_generation(self, stage_a_ckpt_root, stage_b_ckpt_root,
+                                  alpha=1.0):
+        """Load frozen Stage-A and trained Stage-B for BPRC inference."""
+        self.enable_stage_b_residual(
+            stage_a_ckpt_root=stage_a_ckpt_root,
+            init_from="random",
+            alpha=float(alpha),
+        )
+        bdir = os.path.join(stage_b_ckpt_root, "checkpoints")
+        if not os.path.isdir(bdir):
+            bdir = stage_b_ckpt_root
+        embed_path = os.path.join(bdir, "embeddings.pt")
+        spatial_path = os.path.join(bdir, "spatial_encoder.pt")
+        if not os.path.isfile(embed_path):
+            raise FileNotFoundError(
+                f"Stage-B embeddings not found: {embed_path}")
+        self.embedding_manager.load(embed_path)
+        if getattr(self.embedding_manager, "spatial_encoder_model", None) is not None \
+                and os.path.isfile(spatial_path):
+            self.embedding_manager.spatial_encoder_model.load_state_dict(
+                torch.load(spatial_path, map_location="cpu"))
+        self.embedding_manager.training_stage = "B"
+        self.embedding_manager.eval()
+        if self._stage_a_embedding_manager is not None:
+            self._stage_a_embedding_manager.eval()
+        self.stage_b_generation_enabled = True
+        print(f"[Stage-B generation] A={stage_a_ckpt_root} "
+              f"B={stage_b_ckpt_root} alpha={alpha}")
+
     def p_losses_stage_b(self, x_start, cond_a, cond_b, t,
                          mask=None, noise=None):
         """BPRC residual loss: Stage-B fits ``noise - sg(eps_A)``."""
@@ -1581,6 +1612,28 @@ class LatentDiffusion(DDPM):
                 mask, target_size=target_size,
                 downsample_method=downsample_method)
             #mask=1-mask
+        if getattr(self, 'stage_b_generation_enabled', False) and inpaint:
+            if float(inpaint_cfg_scale) > 1.0:
+                raise ValueError(
+                    "Stage-B BPRC generation currently uses "
+                    "inpaint_cfg_scale=1.0; use --bprc_alpha for the "
+                    "residual gain")
+            mask_cond = total_dict.get('mask_cond', total_dict.get('mask'))
+            name = total_dict.get('name', None)
+            # ``c`` is already encoded because log_images uses
+            # force_c_encode=True.  ``xc`` preserves the original caption
+            # list needed to encode the two conditioning branches separately.
+            text_cond = xc if xc is not None else c
+            cond_b, pos_b = self.get_learned_conditioning(
+                text_cond, x=mask_cond, name=name,
+                embedding_manager=self.embedding_manager)
+            with torch.no_grad():
+                cond_a, _ = self.get_learned_conditioning(
+                    text_cond, x=mask_cond, name=name,
+                    embedding_manager=self._stage_a_embedding_manager)
+            self._stage_b_gen_cond_a = cond_a
+            c = cond_b
+            total_dict['position'] = pos_b
         N = min(x.shape[0], N)
         n_row = min(x.shape[0], n_row)
         log["inputs"] = x
@@ -1664,11 +1717,25 @@ class LatentDiffusion(DDPM):
                 _inpaint_cfg_kwargs["unconditional_guidance_scale"] = float(inpaint_cfg_scale)
                 _inpaint_cfg_kwargs["unconditional_conditioning"] = uc
 
-            with self.ema_scope("Plotting Inpaint"):
-                samples, z_denoise_row = self.sample_log(cond=c,batch_size=N,ddim=use_ddim, eta=ddim_eta,ddim_steps=ddim_steps,
-                                                             x0=z[:N], mask=mask,embedding_position=total_dict['position'],adaptive_mask=adaptive_mask,
-                                                             embedding_manager=self.cond_stage_model,decoder=self.decode_first_stage,
-                                                             **_inpaint_cfg_kwargs)
+            _apply_orig = self.apply_model
+            if getattr(self, 'stage_b_generation_enabled', False):
+                _cond_a = self._stage_b_gen_cond_a
+                _alpha = float(getattr(self, 'v10_bprc_alpha', 1.0))
+
+                def _stage_b_apply(x_in, t_in, cond_in, **kw):
+                    eps_b = _apply_orig(x_in, t_in, cond_in, **kw)
+                    eps_a = _apply_orig(x_in, t_in, _cond_a, **kw)
+                    return eps_a.detach() + _alpha * eps_b
+
+                self.apply_model = _stage_b_apply
+            try:
+                with self.ema_scope("Plotting Inpaint"):
+                    samples, z_denoise_row = self.sample_log(cond=c,batch_size=N,ddim=use_ddim, eta=ddim_eta,ddim_steps=ddim_steps,
+                                                                 x0=z[:N], mask=mask,embedding_position=total_dict['position'],adaptive_mask=adaptive_mask,
+                                                                 embedding_manager=self.cond_stage_model,decoder=self.decode_first_stage,
+                                                                 **_inpaint_cfg_kwargs)
+            finally:
+                self.apply_model = _apply_orig
                 # if adaptive_mask:
                 #     # samples, z_denoise_row = self.sample_log(cond=c,batch_size=N,ddim=use_ddim, eta=ddim_eta,ddim_steps=ddim_steps,
                 #     #                                          x0=z[:N], mask=mask,embedding_position=total_dict['position'],adaptive_mask=adaptive_mask,
