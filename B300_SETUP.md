@@ -110,3 +110,27 @@ Launcher:
 /data/solo/wxd/run_2048_b300.sh
 /data/solo/wxd/logs/run_2048_launcher.log
 ```
+
+## First successful B300 run: PixArt 2048
+
+Fixed B300 PixArt tokenizer compatibility by installing transformers 4.46.3 +
+tokenizers 0.20.3 + huggingface_hub 0.36.2 into the overlay, and using the slow
+T5 tokenizer. Linked T5/VAE/tokenizer/scheduler from PixArt 1024 into the 2K
+transformer directory.
+
+Run on B300 GPU1:
+
+```text
+PixArt 2K transformer, 2048×2048
+CFG=4.5, 20 steps, strength 0.9, SDPA, bf16
+```
+
+Output copied to:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/
+  b300_pixart2048_p2048_cfg45/
+```
+
+Result: a large fabric bulge/pleat at the mask band; still an artifact rather
+than a realistic defect, but the full 2048 PixArt path runs on B300.
