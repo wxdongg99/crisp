@@ -89,7 +89,7 @@ if __name__=="__main__":
     parser.add_argument('--generated_data_path', type=str, required=True)
     parser.add_argument('--bs', action='store', type=int, default=8)
     parser.add_argument('--lr', action='store', type=float, default=0.0001)
-    parser.add_argument('--epochs', action='store', type=int, default=30)
+    parser.add_argument('--epochs', action='store', type=int, default=40)
     parser.add_argument(
         "--reverse",
         action="store_true", default=False,

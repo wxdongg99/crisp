@@ -75,3 +75,20 @@ Logs:
   b300_eval_500x4/classification.log
   b300_eval_500x4/localization.log
 ```
+
+## Epoch configuration update
+
+Requested evaluation maxima:
+
+```text
+classification: 40 epochs
+localization:   200 epochs
+```
+
+`train-classification.py` default updated to 40; `train-localization.py` stays
+at 200. A new evaluation run is launched on the same 500×4 generated dataset:
+
+```text
+/data/solo/wxd/checkpoints/classification_e40.log
+/data/solo/wxd/checkpoints/localization_e200.log
+```
