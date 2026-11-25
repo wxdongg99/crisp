@@ -15,6 +15,11 @@ from pathlib import Path
 
 import numpy as np
 
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from utils import random_transform
@@ -222,7 +227,7 @@ def main():
     # the random resize_token_embeddings row.
     init_ids = tokenizer(args.init_word, add_special_tokens=False).input_ids
     init_ids2 = tokenizer_2(args.init_word, add_special_tokens=False).input_ids
-    print(f"[TI-SDXL] init_word={args.init_word!r} init_ids={init_ids} init_ids2={init_ids2}")
+    print(f"[TI-SDXL] init_word={args.init_word!r} init_ids={init_ids} init_ids2={init_ids2}", flush=True)
     init_id = init_ids[0] if init_ids else token_id
     init_id2 = init_ids2[0] if init_ids2 else token_id_2
     with torch.no_grad():
@@ -235,7 +240,7 @@ def main():
         vec1 = torch.nn.Parameter(prev["vec1"].float().to(args.device).clone())
         vec2 = torch.nn.Parameter(prev["vec2"].float().to(args.device).clone())
         n_vec = int(prev.get("num_vectors", vec1.shape[0]))
-        print(f"[TI-SDXL] resumed from {args.init_embedding} n_vec={n_vec}")
+        print(f"[TI-SDXL] resumed from {args.init_embedding} n_vec={n_vec}", flush=True)
     else:
         n_vec = max(1, int(args.num_vectors))
         vec1 = torch.nn.Parameter(
@@ -329,7 +334,7 @@ def main():
             ema1.mul_(args.ema_decay).add_(vec1.detach(), alpha=1.0 - args.ema_decay)
             ema2.mul_(args.ema_decay).add_(vec2.detach(), alpha=1.0 - args.ema_decay)
         if step == 1 or step % 20 == 0 or step == args.steps:
-            print(f"[TI-SDXL] step={step:4d} loss={loss.item():.6f}")
+            print(f"[TI-SDXL] step={step:4d} loss={loss.item():.6f}", flush=True)
 
     torch.save({"vec1": vec1.detach().cpu(), "vec2": vec2.detach().cpu(),
                 "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word,
@@ -344,7 +349,7 @@ def main():
         "targets": len(latents_list), "dynamic_data_enhance": dynamic, "mask_loss": args.mask_loss, "mask_project": args.mask_project, "mask_image": args.mask_image,
         "note": "only placeholder rows in both SDXL text encoders are trainable",
     }, indent=2))
-    print(f"[TI-SDXL] wrote {out}")
+    print(f"[TI-SDXL] wrote {out}", flush=True)
 
 
 if __name__ == "__main__":

@@ -24,3 +24,19 @@ sdxl_native512_pattern17_multi4_10k
 sdxl_native512_pattern18_multi4_10k
 sdxl_native512_pattern19_multi4_10k
 ```
+
+## Logging fix
+
+Training progress was previously buffered. `textual_inversion_sdxl.py` now:
+
+- calls `sys.stdout.reconfigure(line_buffering=True)`;
+- uses `flush=True` for init/resume/step/wrote logs.
+
+Future launches should also use:
+
+```bash
+PYTHONUNBUFFERED=1 python ...
+```
+
+The currently running 10k jobs were started before this change, so their stdout
+may still be buffered; future runs will print step lines immediately.
