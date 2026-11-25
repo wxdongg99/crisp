@@ -41,6 +41,7 @@ def main():
     p.add_argument("--mask-box", nargs=4, type=float, default=[0.35, 0.35, 0.65, 0.65])
     p.add_argument("--mask-image", default="", help="optional real/derived mask image")
     p.add_argument("--composite-mask", default="", help="optional fine mask for final compositing")
+    p.add_argument("--slow-tokenizer", action="store_true", help="use T5Tokenizer slow path")
     p.add_argument("--prompt", required=True)
     p.add_argument("--negative_prompt", default="blurry, low resolution, jpeg artifacts, text, watermark")
     p.add_argument("--embedding", default="")
@@ -79,7 +80,11 @@ def main():
     mask_pil.save(out / "mask_raw.png")
 
     start = time.time()
-    pipe = PixArtSigmaPipeline.from_pretrained(args.model, torch_dtype=dtype)
+    tok_override = None
+    if args.slow_tokenizer:
+        from transformers import T5Tokenizer
+        tok_override = T5Tokenizer.from_pretrained(str(Path(args.model) / "tokenizer"), use_fast=False)
+    pipe = PixArtSigmaPipeline.from_pretrained(args.model, torch_dtype=dtype, tokenizer=tok_override)
     hooks = []
     if args.embedding:
         ckpt = torch.load(args.embedding, map_location="cpu")
