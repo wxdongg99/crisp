@@ -35,6 +35,7 @@ def main():
     prompt = args.prompt or ckpt["prompt"]
     placeholder = ckpt["placeholder"]
     vec = ckpt["vec"].to(dtype)
+    num_vectors = vec.shape[0]
     out = Path(args.output_dir) / (args.run_name or ("pixart_token_" + Path(args.embedding).parent.name))
     imgs = out / "images"
     imgs.mkdir(parents=True, exist_ok=True)
@@ -46,10 +47,28 @@ def main():
     def hook(module, a, kw, output):
         ids = (kw or {}).get("input_ids", a[0] if a else None)
         o = output.clone()
-        for _, idx in (ids == tid).nonzero(as_tuple=False):
-            o[0, idx] = vec.to(o.dtype)
+        for b in range(o.shape[0]):
+            pos = (ids[b] == tid).nonzero(as_tuple=False).flatten()
+            if pos.numel() == 0:
+                continue
+            p = int(pos[0])
+            o[b] = torch.cat([o[b, :p], vec.to(o.dtype), o[b, p + 1:]], dim=0)[:o.shape[1]]
         return o
     h = pipe.text_encoder.encoder.embed_tokens.register_forward_hook(hook, with_kwargs=True)
+    def mask_pre(module, hargs, hkwargs):
+        ids = hkwargs.get("input_ids")
+        mask = hkwargs.get("attention_mask")
+        if ids is not None and mask is not None:
+            out = mask.clone()
+            for b in range(out.shape[0]):
+                pos = (ids[b] == tid).nonzero(as_tuple=False).flatten()
+                if pos.numel() == 0:
+                    continue
+                p = int(pos[0])
+                out[b] = torch.cat([out[b, :p], torch.ones(num_vectors, device=out.device, dtype=out.dtype), out[b, p+1:]], dim=0)[:out.shape[1]]
+            hkwargs["attention_mask"] = out
+        return hargs, hkwargs
+    hm = pipe.text_encoder.register_forward_pre_hook(mask_pre, with_kwargs=True)
     if args.enable_cpu_offload:
         pipe.enable_model_cpu_offload()
     else:
@@ -72,10 +91,10 @@ def main():
         image.save(imgs / name)
         records.append({"file": str(imgs / name), "seed": seed, "output_size": list(image.size)})
         print(f"[PixArt-TI-gen] {i+1}/{args.num_images}")
-    h.remove()
+    h.remove(); hm.remove()
     (out / "manifest.json").write_text(json.dumps({
         "model": args.model, "embedding": args.embedding, "prompt": prompt,
-        "placeholder": placeholder, "resolution": args.resolution, "steps": args.steps,
+        "placeholder": placeholder, "num_vectors": num_vectors, "resolution": args.resolution, "steps": args.steps,
         "seed": args.seed, "records": records,
         "pipeline_load_sec": round(loaded-start,2),
         "generation_elapsed_sec": round(time.time()-gen_start,2),
