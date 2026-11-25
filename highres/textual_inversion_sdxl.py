@@ -172,6 +172,7 @@ def main():
     p.add_argument("--placeholder", default="<anomaly>")
     p.add_argument("--init-word", "--init_word", dest="init_word", default="anomaly")
     p.add_argument("--num-vectors", type=int, default=4)
+    p.add_argument("--init-embedding", default="", help="resume token vectors from a previous ckpt")
     p.add_argument("--random-prompts", action="store_true")
     p.add_argument("--steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=5e-4)
@@ -227,11 +228,20 @@ def main():
     with torch.no_grad():
         emb1.weight[token_id].copy_(emb1.weight[init_id])
         emb2.weight[token_id_2].copy_(emb2.weight[init_id2])
-    n_vec = max(1, int(args.num_vectors))
-    vec1 = torch.nn.Parameter(
-        emb1.weight[init_id].detach().float().repeat(n_vec, 1).clone())
-    vec2 = torch.nn.Parameter(
-        emb2.weight[init_id2].detach().float().repeat(n_vec, 1).clone())
+    if args.init_embedding:
+        prev = torch.load(args.init_embedding, map_location="cpu")
+        if prev.get("placeholder") != args.placeholder:
+            raise ValueError(f"placeholder mismatch: {prev.get('placeholder')} vs {args.placeholder}")
+        vec1 = torch.nn.Parameter(prev["vec1"].float().to(args.device).clone())
+        vec2 = torch.nn.Parameter(prev["vec2"].float().to(args.device).clone())
+        n_vec = int(prev.get("num_vectors", vec1.shape[0]))
+        print(f"[TI-SDXL] resumed from {args.init_embedding} n_vec={n_vec}")
+    else:
+        n_vec = max(1, int(args.num_vectors))
+        vec1 = torch.nn.Parameter(
+            emb1.weight[init_id].detach().float().repeat(n_vec, 1).clone())
+        vec2 = torch.nn.Parameter(
+            emb2.weight[init_id2].detach().float().repeat(n_vec, 1).clone())
     templates = load_crisp_prompt_templates() if args.random_prompts else []
 
     if args.mask_image and len(args.mask_image) != len(args.image):
