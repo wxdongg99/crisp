@@ -94,4 +94,4 @@ cfg_a=3.0, cfg_b=1.0, 2 images, rc=0
 ## Notes
 
 - The previous A100 Stage-A run is archived locally.
-- Fresh B300 5-seed classification is being collected; this file should be updated with the final values.
+- Fresh B300 5-seed classification is complete and recorded above.
