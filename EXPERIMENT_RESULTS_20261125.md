@@ -95,3 +95,67 @@ cfg_a=3.0, cfg_b=1.0, 2 images, rc=0
 
 - The previous A100 Stage-A run is archived locally.
 - Fresh B300 5-seed classification is complete and recorded above.
+
+## Stage-B full evaluation (2026-11-25)
+
+Two Stage-B inference configurations were generated on B300, 500 images per
+pattern (`pattern16`-`pattern19`), with Stage-A 40k principal frozen.
+
+### cfg_a=3.0, cfg_b=1.0
+
+| seed | Acc |
+|---|---:|
+| 42 | 72.92 |
+| 7 | 75.00 |
+| 19 | 85.42 |
+| 0 | 79.17 |
+| 1 | 79.17 |
+
+```
+mean 78.34, std 4.80
+```
+
+### cfg_a=1.0, cfg_b=1.0
+
+| seed | Acc |
+|---|---:|
+| 42 | 72.92 |
+| 7 | 70.83 |
+| 19 | 64.58 |
+| 0 | 60.42 |
+| 1 | 58.33 |
+
+```
+mean 65.42, std 6.35
+```
+
+### Comparison
+
+| Experiment | 5-seed Acc |
+|---|---:|
+| Old CRISP Stage-A | 76.25 +/- 5.02 |
+| new_crisp Stage-A 40k | 82.50 +/- 2.37 |
+| new_crisp Stage-B, cfg_a=3, cfg_b=1 | 78.34 +/- 4.80 |
+| new_crisp Stage-B, cfg_a=1, cfg_b=1 | 65.42 +/- 6.35 |
+
+### Control
+
+A-only (`cfg_a=3`, no Stage-B) vs Stage-B with identical base image, mask and
+`seed=123`, `cfg_a=3, cfg_b=0`:
+
+```
+mask/ori: bit-identical
+generated images: max diff 1-2 / 255, mean diff < 0.02
+```
+
+`cfg_b=0` therefore reproduces A-only within numerical/JPEG tolerance; the
+Stage-B residual path does not silently change Stage-A guidance.
+
+### Observation
+
+The cfg_a=1 run loses the Stage-A guidance and drops to 65.42, close to the
+earlier Stage-A-at-cfg1 result.  The cfg_a=3 run retains A guidance but is still
+4.16 points below A-only, so the current residual is not yet a net positive.
+The Stage-B residual was trained against an un-CFG Stage-A prediction, while
+inference applies it after cfg_a=3; this mismatch is the first hypothesis to
+test (e.g. residual target/scale under CFG, or a smaller cfg_b).
