@@ -7,7 +7,7 @@ Date: 2026-11-25
 - Stage-0 (new_crisp, nobgsub): complete, 4 bg tokens, no bg_sub tokens.
 - Stage-A 40k on new Stage-0: complete (`embeddings_gs-39999.pt`).
 - Stage-A B300 regeneration: complete, 504 images x 4 patterns, `cfg_a=3.0`, LFP, uniform base rotation.
-- Stage-A 5-seed classification: running on B300 GPU7.
+- Stage-A 5-seed classification: complete on B300 GPU7.
 - Stage-B 40k: complete (`embeddings_gs-39999.pt`).
 - Stage-B arbitrary `cfg_a` / `cfg_b` inference: implemented; 2-image smoke test passed.
 - Stage-B full generation + classification: not started yet.
@@ -38,15 +38,21 @@ Same Stage-A 40k checkpoint and final generation code, newly generated pool:
 /pfs/pfs-7jnepv/solo/wxd/new_crisp/eval_runs/stageA40k_regen/
 ```
 
-Current partial results:
+Fresh B300 5-seed results:
 
 | seed | Acc |
 |---|---:|
 | 42 | 83.33 |
-| 7 | running |
-| 19 | pending |
-| 0 | pending |
-| 1 | pending |
+| 7 | 79.17 |
+| 19 | 83.33 |
+| 0 | 85.42 |
+| 1 | 81.25 |
+
+```
+mean 82.50, std 2.37
+```
+
+This fresh B300 run reproduces the previous A100 mean (82.50).
 
 ## Stage-B
 
