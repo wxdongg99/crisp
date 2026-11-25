@@ -114,3 +114,27 @@ loss += embedding_reg_weight * reg
 new_crisp configs all set `embedding_reg_weight: 0.0`, so this code is present
 but **not enabled** in the default Stage-A/Stage-B runs. Our PixArt flag default
 is therefore also 0.0; use a positive weight only as an explicit experiment.
+
+## Root cause of the colorful-noise bug
+
+The text-encoder hook expanded the T5 token block (1 placeholder -> 4 rows),
+but the **pipeline still used the original unexpanded attention mask**.
+The transformer therefore received `prompt_embeds` of length 120 with a mask
+that only described the original 1-token placeholder. Conditioning was broken,
+producing colorful noise at both 512 and 1024.
+
+Fix: encode prompt/negative prompt manually and pass both
+`prompt_embeds` + `prompt_attention_mask` (and the negative counterparts) into
+the pipeline, so embedding and mask are always expanded together.
+
+Validated:
+
+```text
+PixArt 1024 text2img with token -> normal fabric texture (no colorful noise)
+PixArt 1024 inpainting with token -> normal background + coarse mask edit
+```
+
+A second independent issue remains: the 1024 model at **512** latent resolution
+is out-of-distribution for the manual mask sampler. Even the no-token baseline
+at 512 produces colorful bands. PixArt-Sigma should be run at its native 1024
+(or generate 1024 and downscale for 512-sized eval data).

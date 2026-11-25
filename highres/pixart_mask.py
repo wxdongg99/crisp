@@ -86,6 +86,7 @@ def main():
         tok_override = T5Tokenizer.from_pretrained(str(Path(args.model) / "tokenizer"), use_fast=False)
     pipe = PixArtSigmaPipeline.from_pretrained(args.model, torch_dtype=dtype, tokenizer=tok_override)
     hooks = []
+    has_token = bool(args.embedding)
     if args.embedding:
         ckpt = torch.load(args.embedding, map_location="cpu")
         placeholder = ckpt["placeholder"]
@@ -96,10 +97,29 @@ def main():
         def hook(module, a, kw, output):
             ids = (kw or {}).get("input_ids", a[0] if a else None)
             o = output.clone()
-            for _, idx in (ids == tid).nonzero(as_tuple=False):
-                o[0, idx] = vec.to(o.dtype)
+            for b in range(o.shape[0]):
+                pos = (ids[b] == tid).nonzero(as_tuple=False).flatten()
+                if pos.numel() == 0:
+                    continue
+                p = int(pos[0])
+                v = vec.to(device=o.device, dtype=o.dtype)
+                o[b] = torch.cat([o[b, :p], v, o[b, p + 1:]], dim=0)[:o.shape[1]]
             return o
+        def mask_pre(module, hargs, hkwargs):
+            ids = hkwargs.get("input_ids")
+            mask = hkwargs.get("attention_mask")
+            if ids is not None and mask is not None:
+                out = mask.clone()
+                for b in range(out.shape[0]):
+                    pos = (ids[b] == tid).nonzero(as_tuple=False).flatten()
+                    if pos.numel() == 0:
+                        continue
+                    p = int(pos[0])
+                    out[b] = torch.cat([out[b, :p], torch.ones(vec.shape[0], device=out.device, dtype=out.dtype), out[b, p+1:]], dim=0)[:out.shape[1]]
+                hkwargs["attention_mask"] = out
+            return hargs, hkwargs
         hooks.append(pipe.text_encoder.encoder.embed_tokens.register_forward_hook(hook, with_kwargs=True))
+        hooks.append(pipe.text_encoder.register_forward_pre_hook(mask_pre, with_kwargs=True))
     if args.enable_sequential_offload:
         pipe.enable_sequential_cpu_offload()
     else:
@@ -134,13 +154,30 @@ def main():
 
     do_cfg = args.guidance_scale > 1.0
     t5_device = torch.device(args.t5_device)
+
+    def encode_text(text, with_token):
+        tok = pipe.tokenizer([text], padding="max_length", max_length=min(120, pipe.tokenizer.model_max_length),
+                             truncation=True, return_tensors="pt")
+        ids = tok.input_ids.to(t5_device)
+        attn = tok.attention_mask.to(t5_device)
+        emb = pipe.text_encoder.get_input_embeddings()(ids).detach()
+        if with_token:
+            for b in range(emb.shape[0]):
+                pos = (ids[b] == tid).nonzero(as_tuple=False).flatten()
+                if pos.numel() == 0:
+                    continue
+                p0 = int(pos[0])
+                v = vec.to(device=emb.device, dtype=emb.dtype)
+                emb[b] = torch.cat([emb[b, :p0], v, emb[b, p0 + 1:]], dim=0)[:emb.shape[1]]
+                attn[b] = torch.cat([attn[b, :p0], torch.ones(v.shape[0], device=attn.device, dtype=attn.dtype), attn[b, p0 + 1:]], dim=0)[:attn.shape[1]]
+        h = pipe.text_encoder(inputs_embeds=emb, attention_mask=attn).last_hidden_state
+        return h, attn
     with torch.no_grad():
-        prompt_embeds, prompt_attn, neg_embeds, neg_attn = pipe.encode_prompt(
-            args.prompt, do_classifier_free_guidance=do_cfg, negative_prompt=args.negative_prompt,
-            num_images_per_prompt=1, device=t5_device, clean_caption=False)
-    if do_cfg:
-        prompt_embeds = torch.cat([neg_embeds, prompt_embeds], dim=0)
-        prompt_attn = torch.cat([neg_attn, prompt_attn], dim=0)
+        prompt_embeds, prompt_attn = encode_text(args.prompt, has_token)
+        if do_cfg:
+            neg_embeds, neg_attn = encode_text(args.negative_prompt, False)
+            prompt_embeds = torch.cat([neg_embeds, prompt_embeds], dim=0)
+            prompt_attn = torch.cat([neg_attn, prompt_attn], dim=0)
     prompt_embeds = prompt_embeds.to(device, dtype)
     prompt_attn = prompt_attn.to(device)
     import gc

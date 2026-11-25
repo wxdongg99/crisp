@@ -44,31 +44,25 @@ def main():
     pipe.tokenizer.add_tokens([placeholder])
     pipe.text_encoder.resize_token_embeddings(len(pipe.tokenizer))
     tid = pipe.tokenizer.convert_tokens_to_ids(placeholder)
-    def hook(module, a, kw, output):
-        ids = (kw or {}).get("input_ids", a[0] if a else None)
-        o = output.clone()
-        for b in range(o.shape[0]):
-            pos = (ids[b] == tid).nonzero(as_tuple=False).flatten()
-            if pos.numel() == 0:
-                continue
-            p = int(pos[0])
-            o[b] = torch.cat([o[b, :p], vec.to(o.dtype), o[b, p + 1:]], dim=0)[:o.shape[1]]
-        return o
-    h = pipe.text_encoder.encoder.embed_tokens.register_forward_hook(hook, with_kwargs=True)
-    def mask_pre(module, hargs, hkwargs):
-        ids = hkwargs.get("input_ids")
-        mask = hkwargs.get("attention_mask")
-        if ids is not None and mask is not None:
-            out = mask.clone()
-            for b in range(out.shape[0]):
+
+    def encode_text(prompt, with_vec):
+        tok = pipe.tokenizer([prompt], padding="max_length", max_length=120,
+                             truncation=True, return_tensors="pt")
+        ids = tok.input_ids.to(pipe.text_encoder.device)
+        mask = tok.attention_mask.to(pipe.text_encoder.device)
+        emb = pipe.text_encoder.get_input_embeddings()(ids).detach().clone()
+        if with_vec:
+            for b in range(emb.shape[0]):
                 pos = (ids[b] == tid).nonzero(as_tuple=False).flatten()
                 if pos.numel() == 0:
                     continue
                 p = int(pos[0])
-                out[b] = torch.cat([out[b, :p], torch.ones(num_vectors, device=out.device, dtype=out.dtype), out[b, p+1:]], dim=0)[:out.shape[1]]
-            hkwargs["attention_mask"] = out
-        return hargs, hkwargs
-    hm = pipe.text_encoder.register_forward_pre_hook(mask_pre, with_kwargs=True)
+                v = vec.to(device=emb.device, dtype=emb.dtype)
+                emb[b] = torch.cat([emb[b, :p], v, emb[b, p + 1:]], dim=0)[:emb.shape[1]]
+                mask[b] = torch.cat([mask[b, :p], torch.ones(v.shape[0], device=mask.device, dtype=mask.dtype), mask[b, p + 1:]], dim=0)[:mask.shape[1]]
+        h = pipe.text_encoder(inputs_embeds=emb, attention_mask=mask).last_hidden_state
+        return h, mask
+
     if args.enable_cpu_offload:
         pipe.enable_model_cpu_offload()
     else:
@@ -83,7 +77,10 @@ def main():
     for i in range(args.num_images):
         seed = args.seed + i
         gen = torch.Generator(device="cpu").manual_seed(seed)
-        image = pipe(prompt=prompt, negative_prompt=args.negative_prompt,
+        pos, pos_mask = encode_text(prompt, True)
+        neg, neg_mask = encode_text(args.negative_prompt, False)
+        image = pipe(prompt_embeds=pos, prompt_attention_mask=pos_mask,
+                     negative_prompt=None, negative_prompt_embeds=neg, negative_prompt_attention_mask=neg_mask,
                      height=args.resolution, width=args.resolution,
                      num_inference_steps=args.steps, guidance_scale=args.guidance_scale,
                      generator=gen, use_resolution_binning=False).images[0]
@@ -91,7 +88,6 @@ def main():
         image.save(imgs / name)
         records.append({"file": str(imgs / name), "seed": seed, "output_size": list(image.size)})
         print(f"[PixArt-TI-gen] {i+1}/{args.num_images}")
-    h.remove(); hm.remove()
     (out / "manifest.json").write_text(json.dumps({
         "model": args.model, "embedding": args.embedding, "prompt": prompt,
         "placeholder": placeholder, "num_vectors": num_vectors, "resolution": args.resolution, "steps": args.steps,
