@@ -27,3 +27,33 @@ output: /data/solo/wxd/runs/ti/pixart_native512_pattern16_multi4_4800
 Generation script `pixart_token_generate.py` now supports the same multi-vector
 insertion and expanded attention mask; a 512 result will be generated when the
 token finishes.
+
+## Stability failure after 4800 steps
+
+Training loss reached near zero, but the learned T5 vectors exploded:
+
+```text
+vec shape: [4, 4096]
+vec.norm(): 1189.62
+vec.abs().max(): 43.88
+vec.abs().mean(): 7.34
+```
+
+Generation from this token produces colorful noise in both text2img and
+inpainting. Evaluation is therefore **not valid yet**.
+
+Cause: fp32 TI with lr=1e-4 over 4800 mask-loss steps and no vector-norm
+regularization; the token can memorize the masked objective with huge
+embeddings.
+
+Next fix:
+
+```text
+restart from anomaly init
+lr=1e-5 or 5e-6
+weight_decay > 0
+gradient clip
+project vec back to a bounded norm
+early stop around 1000–2000 steps
+monitor vec norm during training
+```
