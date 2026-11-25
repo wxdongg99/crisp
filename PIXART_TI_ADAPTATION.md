@@ -91,3 +91,26 @@ step 1/20/40/60: reg=0.000000, norm=1189.68
 The remaining PixArt 512/1024 generation failure is therefore an integration bug
 in the T5 multi-vector insertion/pipeline path, not a vector-norm explosion.
 Do not run classification/localization eval on these outputs yet.
+
+
+## Coarse regularization: what it actually means
+
+`embedding_to_coarse_loss()` is a **soft prior**, not a hard constraint:
+
+```python
+diff = optimized - initial_embedding
+reg = (diff @ diff.T / num_vectors).mean()
+loss += embedding_reg_weight * reg
+```
+
+- `initial_embedding` is the frozen initialization (for new_crisp, from the init word).
+- The optimizer can still move the vector; the regularizer only adds a cost for
+  deviating from the prior.
+- With a small weight, task loss dominates and the token learns.
+- With a large weight, the token stays near the initialization and learns little.
+- It controls solution norm/overfitting; it does not force the final token to
+  equal the initial token.
+
+new_crisp configs all set `embedding_reg_weight: 0.0`, so this code is present
+but **not enabled** in the default Stage-A/Stage-B runs. Our PixArt flag default
+is therefore also 0.0; use a positive weight only as an explicit experiment.

@@ -67,6 +67,7 @@ def main():
     p.add_argument("--steps", type=int, default=4800)
     p.add_argument("--lr", type=float, default=5e-3)
     p.add_argument("--mask-loss", action="store_true")
+    p.add_argument("--embedding-reg-weight", type=float, default=0.0)
     p.add_argument("--data-enhance", action="store_true")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--dtype", default="bf16", choices=["fp16", "bf16", "fp32"])
@@ -100,6 +101,8 @@ def main():
             embedding.weight[token_id].copy_(embedding.weight[init_id])
         vec = torch.nn.Parameter(embedding.weight[init_id].detach().float().repeat(n_vec, 1).clone())
         print(f"[TI-PixArt] init_word={args.init_word!r} ids={init_ids} n_vec={n_vec}", flush=True)
+    initial_vec = vec.detach().clone()
+    max_vec_norm = float(initial_vec.norm().item()) * 2.0
     for m in (vae, transformer, text_encoder):
         m.requires_grad_(False); m.eval()
     if args.mask_image and len(args.mask_image) != len(args.image):
@@ -135,11 +138,19 @@ def main():
             loss = per.sum() / (ml.sum() * pred.shape[1]).clamp_min(1.0)
         else:
             loss = F.mse_loss(pred, noise)
+        # CRISP embedding_manager2.embedding_to_coarse_loss(), applied to vec.
+        diff = vec - initial_vec
+        reg = (diff @ diff.T / max(1, diff.shape[0])).mean()
+        loss = loss + args.embedding_reg_weight * reg
         opt.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_([vec], 1.0)
         opt.step()
+        with torch.no_grad():
+            n = float(vec.norm().item())
+            if n > max_vec_norm:
+                vec.mul_(max_vec_norm / n)
         if step == 1 or step % 20 == 0 or step == args.steps:
-            print(f"[TI-PixArt] step={step:4d} loss={loss.item():.6f}", flush=True)
+            print(f"[TI-PixArt] step={step:4d} loss={loss.item():.6f} reg={reg.item():.6f} norm={vec.norm().item():.2f}", flush=True)
     torch.save({"vec": vec.detach().cpu(), "prompt": args.prompt, "placeholder": args.placeholder,
                 "num_vectors": n_vec, "init_word": args.init_word, "token_id": token_id,
                 "model": args.model}, out / "pixart_token_embedding.pt")
@@ -148,6 +159,7 @@ def main():
         "num_vectors": n_vec, "init_word": args.init_word, "steps": args.steps,
         "lr": args.lr, "images": args.image, "mask_images": args.mask_image,
         "size": args.size, "mask_loss": args.mask_loss, "data_enhance": args.data_enhance,
+        "embedding_reg_weight": args.embedding_reg_weight, "final_vec_norm": float(vec.norm().item()),
         "elapsed_sec": round(time.time()-t0, 2),
     }, indent=2))
     print(f"[TI-PixArt] wrote {out}", flush=True)
