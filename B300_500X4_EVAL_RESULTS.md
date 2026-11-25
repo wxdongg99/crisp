@@ -92,3 +92,39 @@ at 200. A new evaluation run is launched on the same 500×4 generated dataset:
 /data/solo/wxd/checkpoints/classification_e40.log
 /data/solo/wxd/checkpoints/localization_e200.log
 ```
+
+## 40/200-epoch rerun
+
+Classification (40 epochs) best test accuracy:
+
+```text
+0.6042
+```
+
+Localization (200 epochs), best checkpoint by sum (epoch 134):
+
+| metric | value |
+|---|---:|
+| AUC-I | 0.9747 |
+| AP-I | 0.9932 |
+| AUC-P | 0.8681 |
+| AP-P | 0.3086 |
+| PRO | 0.5180 |
+
+Per-metric maxima over 200 epochs:
+
+| metric | max |
+|---|---:|
+| AUC-I | 0.9896 |
+| AP-I | 0.9973 |
+| AUC-P | 0.8956 |
+| AP-P | 0.3960 |
+| PRO | 0.5180 |
+
+Logs copied to:
+
+```text
+/media/cc/U2-Server/crisp-storage/highres_runs/
+  b300_eval_epochs/classification_e40.log
+  b300_eval_epochs/localization_e200.log
+```
