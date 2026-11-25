@@ -131,8 +131,7 @@ if __name__ == "__main__":
              "random sampling with replacement.")
     parser.add_argument(
         "--cfg_a", type=float, default=None,
-        help="Stage-A CFG scale. Default: 3.0 for Stage-A; "
-             "default 1.0 for Stage-B unless explicitly set.")
+        help="Stage-A CFG scale. Default: 3.0 for both Stage-A and Stage-B.")
     parser.add_argument(
         "--cfg_b", type=float, default=1.0,
         help="Stage-B residual gain in "
@@ -147,11 +146,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_suffix", type=str, default="",
         help="Suffix appended to generated_dataset/<sample>/<anomaly>.")
+    parser.add_argument(
+        "--seed", type=int, default=42,
+        help="Random seed for reproducible base/mask/noise selection.")
 
     # setup_seed(42)
     opt = parser.parse_args()
     if opt.cfg_a is None:
-        opt.cfg_a = 1.0 if opt.stage_b_root else 3.0
+        opt.cfg_a = 3.0
+    setup_seed(opt.seed)
     config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-finetune-encoder+embedding.yaml")
     actual_resume = './models/ldm/text2img-large/model.ckpt'
     model = load_model_from_config(config, actual_resume)
