@@ -57,3 +57,37 @@ project vec back to a bounded norm
 early stop around 1000–2000 steps
 monitor vec norm during training
 ```
+
+## Correction: the vector was not exploding
+
+Measured T5 embedding norm directly:
+
+```text
+anomaly embedding norm: 594.84
+trained vec shape: [4, 4096]
+trained total norm: 1189.62 = sqrt(4) * 594.8
+each row norm: 594.8
+```
+
+So the trained vector is essentially at the normal T5 embedding scale; the
+earlier "norm blow-up" diagnosis was wrong.
+
+Implemented CRISP regularization anyway:
+
+```text
+initial_vec = frozen anomaly-init copy
+reg = (vec - initial_vec) @ (vec - initial_vec).T / num_vectors
+loss += embedding_reg_weight * reg.mean()
+grad clip 1.0
+optional vec norm cap 2× initial norm
+```
+
+Smoke with lr=1e-5, reg weight=0.1:
+
+```text
+step 1/20/40/60: reg=0.000000, norm=1189.68
+```
+
+The remaining PixArt 512/1024 generation failure is therefore an integration bug
+in the T5 multi-vector insertion/pipeline path, not a vector-norm explosion.
+Do not run classification/localization eval on these outputs yet.
