@@ -159,3 +159,50 @@ earlier Stage-A-at-cfg1 result.  The cfg_a=3 run retains A guidance but is still
 The Stage-B residual was trained against an un-CFG Stage-A prediction, while
 inference applies it after cfg_a=3; this mismatch is the first hypothesis to
 test (e.g. residual target/scale under CFG, or a smaller cfg_b).
+
+## Stage-B cfg_a=3.0, cfg_b=3.0 (2026-11-26)
+
+Classification, 5 seeds:
+
+| seed | Acc |
+|---|---:|
+| 42 | 58.33 |
+| 7 | 58.33 |
+| 19 | 68.75 |
+| 0 | 62.50 |
+| 1 | 58.33 |
+
+```
+mean 61.25, std 4.57
+```
+
+## Final Stage-B comparison
+
+### Classification
+
+| Experiment | 5-seed Acc |
+|---|---:|
+| Stage-A 40k | 82.50 +/- 2.37 |
+| Stage-B cfg_a=3, cfg_b=1 | 78.34 +/- 4.80 |
+| Stage-B cfg_a=1, cfg_b=1 | 65.42 +/- 6.35 |
+| Stage-B cfg_a=3, cfg_b=3 | 61.25 +/- 4.57 |
+
+### Localization (best checkpoint, fabric)
+
+| Experiment | AUROC-I | AP-I | F1-I | AUROC-P | AP-P | F1-P | PRO |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| cfg_a=3, cfg_b=1 | 100.0 | 100.0 | 100.0 | 86.4 | 51.9 | 49.3 | 48.4 |
+| cfg_a=1, cfg_b=1 | 100.0 | 100.0 | 100.0 | 80.1 | 35.7 | 38.3 | 42.0 |
+| cfg_a=3, cfg_b=3 | 96.9 | 99.2 | 94.7 | 84.8 | 40.7 | 39.4 | 45.1 |
+
+The localization test was run with `test-localization.py` on the saved best
+checkpoint.  An A-only localization baseline has not yet been run, so the table
+compares Stage-B configurations only.
+
+### Conclusion
+
+- Among the three Stage-B settings, `cfg_a=3, cfg_b=1` is best for both
+  classification and pixel localization.
+- Increasing `cfg_b` to 3 hurts classification (61.25) and does not improve
+  localization over `cfg_b=1`.
+- Stage-B still does not beat the A-only classification result (82.50).
