@@ -40,6 +40,7 @@ def main():
     p.add_argument("--image", required=True)
     p.add_argument("--mask-box", nargs=4, type=float, default=[0.35, 0.35, 0.65, 0.65])
     p.add_argument("--mask-image", default="", help="optional real/derived mask image")
+    p.add_argument("--mask-project", default="lfp_v3", choices=["raw", "lfp_v3"])
     p.add_argument("--composite-mask", default="", help="optional fine mask for final compositing")
     p.add_argument("--slow-tokenizer", action="store_true", help="use T5Tokenizer slow path")
     p.add_argument("--prompt", required=True)
@@ -129,6 +130,10 @@ def main():
             pipe.text_encoder.to(torch.float32)
         pipe.transformer.to(torch.device(args.tx_device))
         pipe.vae.to(torch.device(args.vae_device))
+    if args.mask_project == "lfp_v3":
+        from highres.lfp_mask import lfp_pixel_mask_v3_cached
+        mask_pil = lfp_pixel_mask_v3_cached(mask_pil, pipe.vae, float(pipe.vae.config.scaling_factor), cache_key=args.mask_image or "box")
+        mask_pil.save(out / "mask_lfp_v3.png")
     if args.enable_attention_slicing:
         pipe.enable_attention_slicing()
     if args.fp8:

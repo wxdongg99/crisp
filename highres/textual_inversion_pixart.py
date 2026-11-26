@@ -18,24 +18,34 @@ try:
 except Exception:
     pass
 
-_CRISP_AUG = random_transform()
-
-
-def load_dynamic_pair(img_path, mask_path, size, device):
-    img = Image.open(img_path).convert("RGB").resize((512, 512), Image.Resampling.BICUBIC)
-    mask = Image.open(mask_path).convert("L").resize((512, 512), Image.Resampling.NEAREST)
+def load_dynamic_pair(img_path, mask_path, size, device, vae=None, mask_project="raw"):
+    """Dynamic 1024-native augmentation: resize, flip, rotate, mask-bbox crop."""
+    img = Image.open(img_path).convert("RGB").resize((size, size), Image.Resampling.BICUBIC)
+    mask = Image.open(mask_path).convert("L").resize((size, size), Image.Resampling.NEAREST)
+    if random.random() < 0.5:
+        img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
+    if random.random() < 0.5:
+        img = img.transpose(Image.FLIP_TOP_BOTTOM)
+        mask = mask.transpose(Image.FLIP_TOP_BOTTOM)
+    ang = random.randint(0, 20)
+    img = img.rotate(ang, resample=Image.Resampling.BICUBIC)
+    mask = mask.rotate(ang, resample=Image.Resampling.NEAREST)
+    ma = np.asarray(mask) > 127
+    if ma.any():
+        ys, xs = np.where(ma)
+        x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+        cx1, cy1 = random.randint(0, max(0, int(x0))), random.randint(0, max(0, int(y0)))
+        cx2, cy2 = random.randint(min(size - 1, int(x1)), size - 1), random.randint(min(size - 1, int(y1)), size - 1)
+        if cx2 > cx1 + 32 and cy2 > cy1 + 32:
+            img = img.crop((cx1, cy1, cx2, cy2)).resize((size, size), Image.Resampling.BICUBIC)
+            mask = mask.crop((cx1, cy1, cx2, cy2)).resize((size, size), Image.Resampling.NEAREST)
+    if mask_project == "lfp_v3":
+        from highres.lfp_mask import lfp_pixel_mask_v3_cached
+        mask = lfp_pixel_mask_v3_cached(mask, vae, float(vae.config.scaling_factor), cache_key=str(mask_path))
     it = transforms.ToTensor()(img).unsqueeze(0)
     mt = (transforms.ToTensor()(mask).unsqueeze(0) > 0.5).float()
-    try:
-        it2, mt2 = _CRISP_AUG(it, mt)
-    except RuntimeError:
-        it2, mt2 = it, mt
-    if mt2.sum() == 0:
-        it2, mt2 = it, mt
-    it = F.interpolate(it2, size=(size, size), mode="bicubic", align_corners=False)
-    mt = (F.interpolate(mt2, size=(size, size), mode="nearest") > 0.5).float()
     return (it * 2 - 1).to(device), mt.to(device)
-
 
 def expand_embeddings(emb, ids, token_id, vec, attention_mask):
     out = emb.clone()
@@ -69,6 +79,7 @@ def main():
     p.add_argument("--mask-loss", action="store_true")
     p.add_argument("--embedding-reg-weight", type=float, default=0.0)
     p.add_argument("--data-enhance", action="store_true")
+    p.add_argument("--mask-project", default="lfp_v3", choices=["raw", "lfp_v3"])
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--dtype", default="bf16", choices=["fp16", "bf16", "fp32"])
     p.add_argument("--output_dir", default="textual_inversion_runs/pixart_token")
@@ -122,7 +133,8 @@ def main():
     t0 = time.time()
     for step in range(1, args.steps + 1):
         j = (step - 1) % len(args.image)
-        img, mask_t = load_dynamic_pair(args.image[j], args.mask_image[j], args.size, args.device)
+        img, mask_t = load_dynamic_pair(args.image[j], args.mask_image[j], args.size, args.device,
+                                        vae=vae, mask_project=args.mask_project)
         with torch.no_grad():
             lat = vae.encode(img.to(dtype)).latent_dist.sample() * vae.config.scaling_factor
         h, am = encode_text()
@@ -159,6 +171,7 @@ def main():
         "num_vectors": n_vec, "init_word": args.init_word, "steps": args.steps,
         "lr": args.lr, "images": args.image, "mask_images": args.mask_image,
         "size": args.size, "mask_loss": args.mask_loss, "data_enhance": args.data_enhance,
+        "mask_project": args.mask_project,
         "embedding_reg_weight": args.embedding_reg_weight, "final_vec_norm": float(vec.norm().item()),
         "elapsed_sec": round(time.time()-t0, 2),
     }, indent=2))
