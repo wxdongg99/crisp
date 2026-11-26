@@ -343,12 +343,12 @@ def main():
         if step == 1 or step % 20 == 0 or step == args.steps:
             print(f"[TI-SDXL] step={step:4d} loss={loss.item():.6f}", flush=True)
 
-    torch.save({"vec1": vec1.detach().cpu(), "vec2": vec2.detach().cpu(),
-                "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word,
-                "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding.pt")
-    torch.save({"vec1": ema1.cpu(), "vec2": ema2.cpu(),
-                "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word,
-                "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding_ema.pt")
+    meta = {"prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec,
+            "init_word": args.init_word, "token_id": token_id, "token_id_2": token_id_2,
+            "prompt_mode": "fixed" if args.fixed_prompt and args.prompt else "imagenet_templates_small",
+            "template_index": args.template_index}
+    torch.save({"vec1": vec1.detach().cpu(), "vec2": vec2.detach().cpu(), **meta}, out / "sdxl_token_embedding.pt")
+    torch.save({"vec1": ema1.cpu(), "vec2": ema2.cpu(), **meta}, out / "sdxl_token_embedding_ema.pt")
     (out / "manifest.json").write_text(json.dumps({
         "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word, "random_prompts": args.random_prompts, "prompt_mode": "fixed" if args.fixed_prompt and args.prompt else "imagenet_templates_small", "template_index": args.template_index, "steps": args.steps,
         "lr": args.lr, "images": args.image, "crops_per_image": args.crops_per_image,
