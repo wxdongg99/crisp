@@ -40,7 +40,8 @@ def main():
     p.add_argument("--mask-image", default="", help="optional real defect mask image")
     p.add_argument("--mask-project", default="raw", choices=["raw", "lfp", "lfp_v3"])
     p.add_argument("--composite-mask", default="", help="optional raw defect mask for final compositing")
-    p.add_argument("--prompt", default="a realistic macro photograph of natural beige linen fabric")
+    p.add_argument("--prompt", default="", help="empty = canonical imagenet template")
+    p.add_argument("--template-index", type=int, default=0)
     p.add_argument("--negative_prompt", default="blurry, low resolution, jpeg artifacts, text, watermark")
     p.add_argument("--embedding", default="", help="optional token embedding .pt from sdxl token TI")
     p.add_argument("--resolution", type=int, default=1024)
@@ -80,6 +81,7 @@ def main():
     else:
         print("[SDXL-mask] scheduler=EulerDiscrete")
     hooks = []
+    placeholder = "<anomaly>"
     if args.embedding:
         ckpt = torch.load(args.embedding, map_location="cpu")
         placeholder = ckpt["placeholder"]
@@ -124,6 +126,9 @@ def main():
             return emb, mh
         hooks = [install(pipe.text_encoder, tid1, vec1), install(pipe.text_encoder_2, tid2, vec2)]
         print(f"[SDXL-mask] loaded token embedding {args.embedding}")
+    if not args.prompt:
+        from highres.prompt_templates import canonical_prompt
+        args.prompt = canonical_prompt(placeholder, args.template_index)
     if args.enable_cpu_offload:
         pipe.enable_model_cpu_offload()
     else:

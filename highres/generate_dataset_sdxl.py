@@ -51,7 +51,8 @@ def main():
     p.add_argument("--mask-dir", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--pattern", required=True)
-    p.add_argument("--prompt", required=True)
+    p.add_argument("--prompt", default="", help="empty = canonical imagenet template")
+    p.add_argument("--template-index", type=int, default=0)
     p.add_argument("--count", type=int, default=500)
     p.add_argument("--resolution", type=int, default=512)
     p.add_argument("--steps", type=int, default=40)
@@ -74,6 +75,9 @@ def main():
 
     ckpt = torch.load(Path(args.token_dir) / "sdxl_token_embedding_ema.pt", map_location="cpu")
     placeholder = ckpt["placeholder"]
+    if not args.prompt:
+        from highres.prompt_templates import canonical_prompt
+        args.prompt = canonical_prompt(placeholder, args.template_index)
     vec1 = ckpt["vec1"].to(dtype); vec2 = ckpt["vec2"].to(dtype)
     pipe = StableDiffusionXLInpaintPipeline.from_pretrained(args.model, torch_dtype=dtype)
     pipe.tokenizer.add_tokens([placeholder]); pipe.tokenizer_2.add_tokens([placeholder])

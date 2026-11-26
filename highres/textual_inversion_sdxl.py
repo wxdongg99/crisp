@@ -173,12 +173,15 @@ def main():
     p.add_argument("--data-enhance", action="store_true", help="dynamic new_crisp-style augmentation per step")
     p.add_argument("--debug-mask-dir", default="", help="save image+mask overlays for geometry checks")
     p.add_argument("--ema-decay", type=float, default=0.999)
-    p.add_argument("--prompt", default="a photo of <anomaly>")
+    p.add_argument("--prompt", default="", help="explicit prompt; empty/not fixed = imagenet_templates_small")
     p.add_argument("--placeholder", default="<anomaly>")
     p.add_argument("--init-word", "--init_word", dest="init_word", default="anomaly")
     p.add_argument("--num-vectors", type=int, default=4)
     p.add_argument("--init-embedding", default="", help="resume token vectors from a previous ckpt")
-    p.add_argument("--random-prompts", action="store_true")
+    p.add_argument("--random-prompts", action="store_true", default=True)
+    p.add_argument("--no-random-prompts", dest="random_prompts", action="store_false")
+    p.add_argument("--fixed-prompt", action="store_true")
+    p.add_argument("--template-index", type=int, default=0)
     p.add_argument("--steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--size", type=int, default=1024)
@@ -247,7 +250,7 @@ def main():
             emb1.weight[init_id].detach().float().repeat(n_vec, 1).clone())
         vec2 = torch.nn.Parameter(
             emb2.weight[init_id2].detach().float().repeat(n_vec, 1).clone())
-    templates = load_crisp_prompt_templates() if args.random_prompts else []
+    templates = load_crisp_prompt_templates() if (args.random_prompts and not args.fixed_prompt) else []
 
     if args.mask_image and len(args.mask_image) != len(args.image):
         raise ValueError("--mask-image must correspond 1:1 to --image")
@@ -280,9 +283,13 @@ def main():
     ema1 = vec1.detach().clone()
     ema2 = vec2.detach().clone()
     for step in range(1, args.steps + 1):
-        train_prompt = args.prompt
-        if templates:
+        if args.fixed_prompt and args.prompt:
+            train_prompt = args.prompt
+        elif templates:
             train_prompt = rng.choice(templates).format(args.placeholder)
+        else:
+            from highres.prompt_templates import canonical_prompt
+            train_prompt = canonical_prompt(args.placeholder, args.template_index)
         prompt_embeds, pooled = get_prompt_embeds(text_encoder, text_encoder_2, tokenizer, tokenizer_2,
                                                   train_prompt, token_id, token_id_2,
                                                   vec1.to(dtype), vec2.to(dtype), args.device)
@@ -343,7 +350,7 @@ def main():
                 "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word,
                 "token_id": token_id, "token_id_2": token_id_2}, out / "sdxl_token_embedding_ema.pt")
     (out / "manifest.json").write_text(json.dumps({
-        "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word, "random_prompts": args.random_prompts, "steps": args.steps,
+        "prompt": args.prompt, "placeholder": args.placeholder, "num_vectors": n_vec, "init_word": args.init_word, "random_prompts": args.random_prompts, "prompt_mode": "fixed" if args.fixed_prompt and args.prompt else "imagenet_templates_small", "template_index": args.template_index, "steps": args.steps,
         "lr": args.lr, "images": args.image, "crops_per_image": args.crops_per_image,
         "ema_decay": args.ema_decay, "seed": args.seed, "size": args.size,
         "targets": len(latents_list), "dynamic_data_enhance": dynamic, "mask_loss": args.mask_loss, "mask_project": args.mask_project, "mask_image": args.mask_image,
