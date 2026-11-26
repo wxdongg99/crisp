@@ -32,8 +32,11 @@ def main():
 
     dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
     ckpt = torch.load(args.embedding, map_location="cpu")
-    prompt = args.prompt or ckpt["prompt"]
     placeholder = ckpt["placeholder"]
+    prompt = args.prompt or ckpt.get("prompt", "")
+    if not prompt:
+        from highres.prompt_templates import canonical_prompt
+        prompt = canonical_prompt(placeholder, int(ckpt.get("template_index", 0)))
     vec = ckpt["vec"].to(dtype)
     num_vectors = vec.shape[0]
     out = Path(args.output_dir) / (args.run_name or ("pixart_token_" + Path(args.embedding).parent.name))

@@ -12,6 +12,7 @@ from torchvision import transforms
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from utils import random_transform
+from highres.prompt_templates import load_templates, random_prompt, canonical_prompt
 
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -83,8 +84,9 @@ def main():
     p.add_argument("--model", default="/media/cc/U2-Server/crisp-storage/models/pixart_sigma_1024")
     p.add_argument("--image", required=True, nargs="+")
     p.add_argument("--mask-image", nargs="*", default=[])
-    p.add_argument("--prompt", required=True)
+    p.add_argument("--prompt", default="", help="fixed prompt; empty = sample imagenet_templates_small")
     p.add_argument("--placeholder", default="<anomaly>")
+    p.add_argument("--template-index", type=int, default=0, help="canonical template for generation")
     p.add_argument("--init-word", "--init_word", dest="init_word", default="anomaly")
     p.add_argument("--init-embedding", default="")
     p.add_argument("--num-vectors", type=int, default=4)
@@ -139,9 +141,10 @@ def main():
     if args.mask_image and len(args.mask_image) != len(args.image):
         raise ValueError("mask-image count must match image count")
 
-    def encode_text():
+    templates = load_templates() if not args.prompt else []
+    def encode_text(text):
         max_len = min(120, tokenizer.model_max_length)
-        tok = tokenizer([args.prompt], padding="max_length", max_length=max_len,
+        tok = tokenizer([text], padding="max_length", max_length=max_len,
                         truncation=True, return_tensors="pt")
         ids = tok.input_ids.to(args.device); mask = tok.attention_mask.to(args.device)
         emb = text_encoder.get_input_embeddings()(ids).detach().clone()
@@ -168,7 +171,8 @@ def main():
                                         vae=vae, mask_project=mask_project)
         with torch.no_grad():
             lat = vae.encode(img.to(dtype)).latent_dist.sample() * vae.config.scaling_factor
-        h, am = encode_text()
+        train_prompt = args.prompt or (random_prompt(args.placeholder, random) if templates else canonical_prompt(args.placeholder, args.template_index))
+        h, am = encode_text(train_prompt)
         noise = torch.randn_like(lat)
         t = torch.randint(0, scheduler.config.num_train_timesteps, (lat.shape[0],), device=args.device).long()
         noisy = scheduler.add_noise(lat, noise, t)
@@ -193,16 +197,22 @@ def main():
             if n > max_vec_norm:
                 vec.mul_(max_vec_norm / n)
         if step == 1 or step % 20 == 0 or step == args.steps:
+            if step == 1:
+                print(f"[TI-PixArt] prompt={train_prompt!r}", flush=True)
             print(f"[TI-PixArt] step={step:4d} loss={loss.item():.6f} reg={reg.item():.6f} norm={vec.norm().item():.2f}", flush=True)
     torch.save({"vec": vec.detach().cpu(), "prompt": args.prompt, "placeholder": args.placeholder,
                 "num_vectors": n_vec, "init_word": args.init_word, "token_id": token_id,
-                "model": args.model}, out / "pixart_token_embedding.pt")
+                "prompt_mode": "fixed" if args.prompt else "imagenet_templates_small",
+                "template_index": args.template_index, "model": args.model},
+               out / "pixart_token_embedding.pt")
     (out / "manifest.json").write_text(json.dumps({
         "model": args.model, "prompt": args.prompt, "placeholder": args.placeholder,
         "num_vectors": n_vec, "init_word": args.init_word, "steps": args.steps,
         "lr": args.lr, "images": args.image, "mask_images": args.mask_image,
         "size": args.size, "mask_loss": args.mask_loss, "data_enhance": args.data_enhance,
         "mask_project": args.mask_project, "lfp_cache": bool(lfp_cache),
+        "prompt_mode": "fixed" if args.prompt else "imagenet_templates_small",
+        "template_index": args.template_index,
         "embedding_reg_weight": args.embedding_reg_weight, "final_vec_norm": float(vec.norm().item()),
         "elapsed_sec": round(time.time()-t0, 2),
     }, indent=2))

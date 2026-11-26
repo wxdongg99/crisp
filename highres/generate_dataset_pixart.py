@@ -25,7 +25,9 @@ def main():
     p.add_argument("--mask-dir", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--pattern", required=True)
-    p.add_argument("--prompt", required=True)
+    p.add_argument("--placeholder", default="")
+    p.add_argument("--template-index", type=int, default=0)
+    p.add_argument("--prompt", default="", help="fixed prompt; empty = canonical imagenet template")
     p.add_argument("--count", type=int, default=500)
     p.add_argument("--native-resolution", type=int, default=1024)
     p.add_argument("--output-resolution", type=int, default=512)
@@ -54,6 +56,11 @@ def main():
 
     ckpt = torch.load(args.embedding, map_location="cpu")
     placeholder = ckpt["placeholder"]; vec = ckpt["vec"].to(dtype)
+    if args.placeholder:
+        placeholder = args.placeholder
+    if not args.prompt:
+        from highres.prompt_templates import canonical_prompt
+        args.prompt = canonical_prompt(placeholder, args.template_index)
     tok = T5Tokenizer.from_pretrained(str(Path(args.model) / "tokenizer"), use_fast=False, legacy=True)
     pipe = PixArtSigmaPipeline.from_pretrained(args.model, torch_dtype=dtype, tokenizer=tok)
     pipe.tokenizer.add_tokens([placeholder]); pipe.text_encoder.resize_token_embeddings(len(pipe.tokenizer))

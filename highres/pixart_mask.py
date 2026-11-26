@@ -43,7 +43,7 @@ def main():
     p.add_argument("--mask-project", default="lfp_v3", choices=["raw", "lfp_v3"])
     p.add_argument("--composite-mask", default="", help="optional fine mask for final compositing")
     p.add_argument("--slow-tokenizer", action="store_true", help="use T5Tokenizer slow path")
-    p.add_argument("--prompt", required=True)
+    p.add_argument("--prompt", default="", help="empty = canonical imagenet template")
     p.add_argument("--negative_prompt", default="blurry, low resolution, jpeg artifacts, text, watermark")
     p.add_argument("--embedding", default="")
     p.add_argument("--resolution", type=int, default=1024)
@@ -88,6 +88,7 @@ def main():
     pipe = PixArtSigmaPipeline.from_pretrained(args.model, torch_dtype=dtype, tokenizer=tok_override)
     hooks = []
     has_token = bool(args.embedding)
+    placeholder = "<anomaly>"
     if args.embedding:
         ckpt = torch.load(args.embedding, map_location="cpu")
         placeholder = ckpt["placeholder"]
@@ -121,6 +122,9 @@ def main():
             return hargs, hkwargs
         hooks.append(pipe.text_encoder.encoder.embed_tokens.register_forward_hook(hook, with_kwargs=True))
         hooks.append(pipe.text_encoder.register_forward_pre_hook(mask_pre, with_kwargs=True))
+    if not args.prompt:
+        from highres.prompt_templates import canonical_prompt
+        args.prompt = canonical_prompt(placeholder, 0)
     if args.enable_sequential_offload:
         pipe.enable_sequential_cpu_offload()
     else:
