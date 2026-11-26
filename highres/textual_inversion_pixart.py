@@ -63,6 +63,21 @@ def expand_embeddings(emb, ids, token_id, vec, attention_mask):
     return out, attention_mask
 
 
+def build_lfp_mask_cache(mask_paths, size, vae, cache_dir):
+    """Precompute LFP v3 masks at training size; avoids per-step VAE/distance work."""
+    from highres.lfp_mask import lfp_pixel_mask_v3_cached
+    cache_dir = Path(cache_dir); cache_dir.mkdir(parents=True, exist_ok=True)
+    mapping = {}
+    for path in mask_paths:
+        dst = cache_dir / f"{Path(path).stem}_{size}.png"
+        if not dst.exists():
+            raw = Image.open(path).convert("L").resize((size, size), Image.Resampling.NEAREST)
+            lfp = lfp_pixel_mask_v3_cached(raw, vae, float(vae.config.scaling_factor), cache_key=str(path))
+            lfp.save(dst)
+        mapping[str(path)] = dst
+    return mapping
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", default="/media/cc/U2-Server/crisp-storage/models/pixart_sigma_1024")
@@ -80,6 +95,7 @@ def main():
     p.add_argument("--embedding-reg-weight", type=float, default=0.0)
     p.add_argument("--data-enhance", action="store_true")
     p.add_argument("--mask-project", default="lfp_v3", choices=["raw", "lfp_v3"])
+    p.add_argument("--lfp-cache-dir", default="", help="precomputed LFP v3 mask cache")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--dtype", default="bf16", choices=["fp16", "bf16", "fp32"])
     p.add_argument("--output_dir", default="textual_inversion_runs/pixart_token")
@@ -90,6 +106,10 @@ def main():
 
     torch.manual_seed(args.seed); random.seed(args.seed)
     dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
+    if dtype == torch.float32:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision("high")
     out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
     tokenizer = T5Tokenizer.from_pretrained(args.model, subfolder="tokenizer", legacy=True)
     text_encoder = T5EncoderModel.from_pretrained(args.model, subfolder="text_encoder", torch_dtype=dtype).to(args.device)
@@ -129,12 +149,23 @@ def main():
         h = text_encoder(inputs_embeds=emb, attention_mask=mask).last_hidden_state
         return h, mask
 
+    lfp_cache = {}
+    if args.mask_project == "lfp_v3" and args.mask_image:
+        cache_dir = Path(args.lfp_cache_dir) if args.lfp_cache_dir else out / "lfp_cache"
+        lfp_cache = build_lfp_mask_cache(args.mask_image, args.size, vae, cache_dir)
+        print(f"[TI-PixArt] lfp cache ready: {len(lfp_cache)} masks -> {cache_dir}", flush=True)
+
     opt = torch.optim.AdamW([vec], lr=args.lr, betas=(0.9, 0.999), weight_decay=0.0)
     t0 = time.time()
     for step in range(1, args.steps + 1):
         j = (step - 1) % len(args.image)
-        img, mask_t = load_dynamic_pair(args.image[j], args.mask_image[j], args.size, args.device,
-                                        vae=vae, mask_project=args.mask_project)
+        mask_path = args.mask_image[j]
+        mask_project = args.mask_project
+        if lfp_cache:
+            mask_path = lfp_cache[str(mask_path)]
+            mask_project = "raw"  # cache is already LFP v3
+        img, mask_t = load_dynamic_pair(args.image[j], mask_path, args.size, args.device,
+                                        vae=vae, mask_project=mask_project)
         with torch.no_grad():
             lat = vae.encode(img.to(dtype)).latent_dist.sample() * vae.config.scaling_factor
         h, am = encode_text()
@@ -171,7 +202,7 @@ def main():
         "num_vectors": n_vec, "init_word": args.init_word, "steps": args.steps,
         "lr": args.lr, "images": args.image, "mask_images": args.mask_image,
         "size": args.size, "mask_loss": args.mask_loss, "data_enhance": args.data_enhance,
-        "mask_project": args.mask_project,
+        "mask_project": args.mask_project, "lfp_cache": bool(lfp_cache),
         "embedding_reg_weight": args.embedding_reg_weight, "final_vec_norm": float(vec.norm().item()),
         "elapsed_sec": round(time.time()-t0, 2),
     }, indent=2))
