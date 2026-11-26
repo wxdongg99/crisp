@@ -141,6 +141,9 @@ if __name__ == "__main__":
         "--stage_a_root", type=str, default="logs/anomaly-checkpoints",
         help="Stage-A run root containing checkpoints/ (default: logs path).")
     parser.add_argument(
+        "--stage_b_no_psp", action="store_true", default=False,
+        help="Stage-B residual branch was trained without PSP.")
+    parser.add_argument(
         "--stage_b_root", type=str, default=None,
         help="Optional Stage-B run root. Enables BPRC residual inference.")
     parser.add_argument(
@@ -172,6 +175,9 @@ if __name__ == "__main__":
             stage_b_ckpt_root=opt.stage_b_root,
             cfg_a=float(opt.cfg_a),
             cfg_b=float(opt.cfg_b))
+        if bool(opt.stage_b_no_psp):
+            model.embedding_manager.spatial_encoder = False
+            print("[Stage-B generation] noPSP: residual branch PSP disabled")
     else:
         ckpt = torch.load(os.path.join(_ckpt_dir, "spatial_encoder.pt"))
         model.embedding_manager.spatial_encoder_model.load_state_dict(ckpt)

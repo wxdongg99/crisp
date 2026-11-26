@@ -127,6 +127,7 @@ class EmbeddingManager(nn.Module):
             # Unconditional branch: return pure text embeddings without
             # per-class TI / bg / PSP injection.
             return embedded_text, None
+        position = None
         # if img is not None:
         #     from torchvision.utils import save_image
         #     print(img.shape,img.min(),img.max())
@@ -220,7 +221,9 @@ class EmbeddingManager(nn.Module):
                         position[row][0]=col
                         position[row][1]=col+num_vectors_for_token
                 else:
-                    num_vectors_for_token = min(placeholder_embedding.shape[0], max_step_tokens)
+                    # No-PSP branch: placeholder_embedding is [B, K, D]
+                    # (class TI only), not a flat [K, D] tensor.
+                    num_vectors_for_token = min(placeholder_embedding.shape[1], max_step_tokens)
 
                     placeholder_rows, placeholder_cols = torch.where(tokenized_text == placeholder_token.to(device))
                     # rows对应batchsize：0~batchsize-1;col:对应*在哪个位置
@@ -237,7 +240,8 @@ class EmbeddingManager(nn.Module):
                             [tokenized_text[row][:col], placeholder_token.repeat(num_vectors_for_token).to(device),
                              tokenized_text[row][col + 1:]], axis=0)[:n]  # 把*插到77维的text中间
                         new_embed_row = torch.cat(
-                            [embedded_text[row][:col], placeholder_embedding[:num_vectors_for_token],
+                            [embedded_text[row][:col],
+                             placeholder_embedding[row, :num_vectors_for_token],
                              embedded_text[row][col + 1:]], axis=0)[:n]
 
                         embedded_text[row] = new_embed_row
