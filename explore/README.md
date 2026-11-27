@@ -166,3 +166,40 @@ recon_compare.png         # I_ori / LFP mask / I_fill / I_recon
 latent_recon_compare.png  # z_orig / z_fill / z_recon / |z_recon-z_orig|*outside
 dinov2_patch_cosine.png   # patch cosine map vs I_ori
 ```
+
+
+## LFP v1 vs LFP v3 replacement comparison
+
+Script: `explore/compare_lfp_v1_v3_recon_dinov2.py`
+
+This is the direct check: same z_orig / z_fill, only the replacement mask differs.
+
+```text
+z_recon = z_fill.clone()
+z_recon[mask inside]  = z_orig[mask inside]
+z_recon[mask outside] = z_fill[mask outside]
+```
+
+pattern16/001, 1024, mean-fill [75,75,75]:
+
+| mask | area fraction | cls vs I_ori | mask patch vs I_ori | outside patch vs I_ori | mask patch vs I_fill | latent diff inside | latent diff outside |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| LFP v1 | 6.7139% | 0.9454 | 0.7819 | 0.9601 | 0.5592 | 0.0000 | 2.4527 |
+| LFP v3 | 6.7139% | 0.9285 | 0.7509 | 0.9584 | 0.5447 | 0.0000 | 2.5386 |
+
+Key point: v1 and v3 have the same area by construction (v3 target area = v1
+area), but different shapes. v1 preserves the decoded anomaly slightly better
+(mask patch cosine vs I_ori 0.782 vs 0.751); v3 changes a bit more of the
+surrounding support. Both keep latent inside exactly equal to z_orig.
+
+Outputs:
+
+```text
+v1_v3_recon_compare.png
+mask_v1.png
+mask_v3.png
+mask_v1_v3_overlay.png
+I_recon_v1.png
+I_recon_v3.png
+stats_v1_v3.txt
+```
