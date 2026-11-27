@@ -110,54 +110,59 @@ Options:
 ```
 
 
-## LFP VAE fill/reconstruct + DINOv2 score
+## LFP VAE fill/reconstruct + DINOv2 score (corrected definition)
 
 Script: `explore/test_lfp_vae_recon_dinov2.py`
 
-Pipeline:
+Corrected pipeline (anomaly latent is kept INSIDE the LFP mask):
 
 ```text
 I_ori
 -> z_orig = VAE.encode(I_ori)
+
 I_fill = I_ori with LFP mask replaced by solid color (mean of normal pixels)
 -> z_fill = VAE.encode(I_fill)
+
 z_recon = z_fill.clone()
-z_recon[mask outside] = z_orig[mask outside]   # only LFP-mask latent is replaced
+z_recon[mask inside]  = z_orig[mask inside]   # keep anomaly latent
+z_recon[mask outside] = z_fill[mask outside]  # clean fill latent outside
+
 I_recon = VAE.decode(z_recon)
-DINOv2 cosine(I_recon, I_ori)
+DINOv2(I_recon, I_ori) and DINOv2(I_recon, I_fill)
 ```
 
-Run on B300:
-
-```bash
-CUDA_VISIBLE_DEVICES=2 TORCH_HOME=/data/solo/wxd/torch_hub PYTHONPATH=$PWD /data/solo/wxd/envs/qwen21_py310/bin/python explore/test_lfp_vae_recon_dinov2.py   --model /data/solo/wxd/models/Qwen-Image-2.1   --image /data/solo/wxd/data/zju_leaper_native512/fabric/test/pattern16/001.jpg   --mask /data/solo/wxd/data/zju_leaper_native512/fabric/ground_truth/pattern16/001.png   --size 1024 --out_dir explore/lfp_recon_dinov2/pattern16_001
-```
-
-DINOv2 score on 3 pattern16 samples:
+Latent check (pattern16/001): inside the LFP mask `z_recon == z_orig` exactly,
+outside it comes from z_fill:
 
 ```text
-sample  LFP frac  global_cls_cos  mask_patch_cos  outside_patch_cos  mask_change
-001     6.71%     0.6986          0.3154          0.8754             0.6846
-002     6.23%     0.6147          0.3210          0.8158             0.6790
-003     1.61%     0.7537          0.3877          0.9080             0.6123
+latent_absdiff_inside_mask_vs_orig  = 0.0000
+latent_absdiff_outside_mask_vs_orig = 4.8420
 ```
 
-Interpretation: mask-region DINOv2 patch similarity drops to ~0.32–0.39 while
-outside stays ~0.82–0.91, so the fill/reconstruct operation changes the masked
-defect region far more than the background. `mask_change = 1 - mask_patch_cos`
-is the restoration/change score (higher = more changed inside LFP mask).
-
-On pattern16/001 the latent check is exact:
+DINOv2 on 3 pattern16 samples:
 
 ```text
-latent_absdiff_inside_mask  = 32.6478
-latent_absdiff_outside_mask = 0.0000
+sample LFP frac  cls(vs_ori)  mask_patch(vs_ori)  outside_patch(vs_ori)  mask_patch(vs_fill)  outside_patch(vs_fill)
+001    6.71%     0.8099       0.5111              0.9022                 0.4670               0.9101
+002    6.23%     0.6925       0.3868              0.8485                 0.4699               0.8574
+003    1.61%     0.7202       0.4901              0.9098                 0.4811               0.9108
 ```
 
-So outside the LFP latent mask `z_orig` is byte-identical; only the mask region
-is replaced by `z_fill`. Visuals:
+Interpretation:
+
+- Inside the LFP latent mask, z_recon is the original anomaly latent.
+- DINOv2 mask-patch cosine vs I_ori is only 0.39-0.51 after VAE decode,
+  so the anomaly is preserved but its decoded appearance changes.
+- DINOv2 mask-patch cosine vs I_fill is ~0.47-0.48, so the mask region remains
+  closer to the original anomaly than to the solid fill.
+- Outside, similarity to I_ori is 0.85-0.91, so the background is preserved.
+- `mask_anomaly_retention = mask_patch_cosine_vs_ori` (higher = more anomaly retained).
+- `mask_anomaly_strength_vs_fill = 1 - mask_patch_cosine_vs_fill`.
+
+Visuals:
 
 ```text
-recon_compare.png        # I_ori / mask / I_fill / I_recon
-latent_recon_compare.png # z_orig / z_fill / z_recon / |z_recon-z_orig|*mask
+recon_compare.png         # I_ori / LFP mask / I_fill / I_recon
+latent_recon_compare.png  # z_orig / z_fill / z_recon / |z_recon-z_orig|*outside
+dinov2_patch_cosine.png   # patch cosine map vs I_ori
 ```

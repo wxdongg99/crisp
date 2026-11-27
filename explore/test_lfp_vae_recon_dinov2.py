@@ -72,6 +72,8 @@ def main():
     ap.add_argument("--fill-mode", default="mean", choices=["mean", "gray", "white"])
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--dinov2-size", type=int, default=518)
+    ap.add_argument("--dinov2-repo", default="/data/solo/wxd/torch_hub/hub/facebookresearch_dinov2_main")
+    ap.add_argument("--dinov2-weights", default="/data/solo/wxd/torch_hub/hub/checkpoints/dinov2_vitb14_pretrain.pth")
     args = ap.parse_args()
     out = Path(args.out_dir); out.mkdir(parents=True, exist_ok=True)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -98,23 +100,36 @@ def main():
     # latent-size LFP mask (nearest)
     ml = F.interpolate(torch.from_numpy((m.astype(np.float32)))[None, None].to(dev),
                        size=z_orig.shape[-2:], mode="nearest")
-    # Explicit latent restoration: start from z_fill, put z_orig back outside LFP.
+    # Goal: isolate how much anomaly remains inside the LFP latent mask.
+    # Start from z_fill (normal fill), keep z_orig inside the mask, z_fill outside.
     z_recon = z_fill.clone()
-    z_recon = torch.where(ml > 0.5, z_fill, z_orig)
+    z_recon = torch.where(ml > 0.5, z_orig, z_fill)
     with torch.no_grad():
         I_recon = decode(vae, z_recon)
     I_recon.save(out / "I_recon.png")
     I_ori.save(out / "I_ori.png")
     I_fill.save(out / "I_fill.png")
     lfp.save(out / "mask_lfp_v3.png")
-    # DINOv2 (torch.hub cache under TORCH_HOME/hub)
-    model = torch.hub.load("facebookresearch/dinov2", "dinov2_vitb14", source="github")
+    # DINOv2: prefer the local cached repo + explicit checkpoint (offline-safe)
+    repo = Path(args.dinov2_repo); weights = Path(args.dinov2_weights)
+    if repo.exists() and weights.exists():
+        import sys as _sys
+        _sys.path.insert(0, str(repo))
+        from dinov2.hub.backbones import dinov2_vitb14
+        model = dinov2_vitb14(pretrained=False)
+        model.load_state_dict(torch.load(str(weights), map_location="cpu"))
+        print("[recon] loaded local DINOv2", repo, weights, flush=True)
+    else:
+        model = torch.hub.load("facebookresearch/dinov2", "dinov2_vitb14", source="github")
     model = model.to(dev).eval()
     cls_cos, grid = dino_patch_similarity(model, I_recon, I_ori, args.dinov2_size, dev)
     # map LFP mask to DINO patch grid and average patch cosine inside/outside
     mp = np.array(lfp.resize((grid.shape[1], grid.shape[0]), Image.Resampling.NEAREST)) > 127
     mask_cos = float(grid[mp].mean()) if mp.any() else float("nan")
     outside_cos = float(grid[~mp].mean()) if (~mp).any() else float("nan")
+    cls_cos_fill, grid_fill = dino_patch_similarity(model, I_recon, I_fill, args.dinov2_size, dev)
+    fill_mask_cos = float(grid_fill[mp].mean()) if mp.any() else float("nan")
+    fill_outside_cos = float(grid_fill[~mp].mean()) if (~mp).any() else float("nan")
     # save patch cosine heatmap
     g = np.clip((grid + 1) / 2, 0, 1)
     heat = (g * 255).astype(np.uint8)
@@ -126,9 +141,9 @@ def main():
         r = np.clip(n * 2, 0, 1); b = np.clip((1 - n) * 2, 0, 1); g = np.clip(1 - np.abs(n * 2 - 1), 0, 1)
         return Image.fromarray((np.stack([r, g, b], -1) * 255).astype(np.uint8)).resize((args.size, args.size), Image.Resampling.BILINEAR)
     zmask = (ml[0, 0] > 0.5).float()
-    lat_diff = (z_recon - z_orig).abs().mean(0) * zmask
+    lat_diff_out = (z_recon - z_orig).abs().mean(0) * (1 - zmask)
     lat_panels = [("z_orig mean", latent_heat(z_orig)), ("z_fill mean", latent_heat(z_fill)),
-                  ("z_recon mean", latent_heat(z_recon)), ("|z_recon-z_orig| × mask", latent_heat(lat_diff[None]))]
+                  ("z_recon mean", latent_heat(z_recon)), ("|z_recon-z_orig| × outside", latent_heat(lat_diff_out[None]))]
     lW = 420
     lsheet = Image.new("RGB", (lW * 4, lW + 30), (255, 255, 255)); ld = ImageDraw.Draw(lsheet)
     for i, (lab, im) in enumerate(lat_panels):
@@ -145,13 +160,16 @@ def main():
         f"size={args.size}\nfill_mode={args.fill_mode}\nfill_color={color.tolist()}\n"
         f"lfp_fraction={float(m.mean()):.6f}\n"
         f"dinov2_cls_cosine_recon_vs_ori={cls_cos:.6f}\n"
-        f"dinov2_patch_cosine_mask_mean={mask_cos:.6f}\n"
-        f"dinov2_patch_cosine_outside_mean={outside_cos:.6f}\n"
+        f"dinov2_patch_cosine_mask_mean_vs_ori={mask_cos:.6f}\n"
+        f"dinov2_patch_cosine_outside_mean_vs_ori={outside_cos:.6f}\n"
+        f"dinov2_cls_cosine_recon_vs_fill={cls_cos_fill:.6f}\n"
+        f"dinov2_patch_cosine_mask_mean_vs_fill={fill_mask_cos:.6f}\n"
+        f"dinov2_patch_cosine_outside_mean_vs_fill={fill_outside_cos:.6f}\n"
         f"dinov2_mask_change_1_minus_cos={1.0-mask_cos:.6f}\n"
         f"dinov2_global_change_1_minus_cls={1.0-cls_cos:.6f}\n"
         f"dinov2_patch_grid={grid.shape[0]}x{grid.shape[1]}\n"
-        f"latent_absdiff_inside_mask={float(((z_recon-z_orig).abs()*zmask).sum()/zmask.sum().clamp_min(1)):.6f}\n"
-        f"latent_absdiff_outside_mask={float(((z_recon-z_orig).abs()*(1-zmask)).sum()/(1-zmask).sum().clamp_min(1)):.6f}\n")
+        f"latent_absdiff_inside_mask_vs_orig={float(((z_recon-z_orig).abs()*zmask).sum()/zmask.sum().clamp_min(1)):.6f}\n"
+        f"latent_absdiff_outside_mask_vs_orig={float(((z_recon-z_orig).abs()*(1-zmask)).sum()/(1-zmask).sum().clamp_min(1)):.6f}\n")
     print(open(out / "stats.txt").read())
     print("saved", out / "recon_compare.png")
 
