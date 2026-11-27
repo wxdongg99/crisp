@@ -108,3 +108,40 @@ Options:
 2. test selecting a subset of channels (e.g. top-4 by footprint overlap)
 3. use a 4-channel VAE (SDXL/PixArt) when strict LFP-4ch is required
 ```
+
+
+## LFP VAE fill/reconstruct + DINOv2 score
+
+Script: `explore/test_lfp_vae_recon_dinov2.py`
+
+Pipeline:
+
+```text
+I_ori
+-> z_orig = VAE.encode(I_ori)
+I_fill = I_ori with LFP mask replaced by solid color (mean of normal pixels)
+-> z_fill = VAE.encode(I_fill)
+z_recon = (1 - M_lfp_latent) * z_orig + M_lfp_latent * z_fill
+I_recon = VAE.decode(z_recon)
+DINOv2 cosine(I_recon, I_ori)
+```
+
+Run on B300:
+
+```bash
+CUDA_VISIBLE_DEVICES=2 TORCH_HOME=/data/solo/wxd/torch_hub PYTHONPATH=$PWD /data/solo/wxd/envs/qwen21_py310/bin/python explore/test_lfp_vae_recon_dinov2.py   --model /data/solo/wxd/models/Qwen-Image-2.1   --image /data/solo/wxd/data/zju_leaper_native512/fabric/test/pattern16/001.jpg   --mask /data/solo/wxd/data/zju_leaper_native512/fabric/ground_truth/pattern16/001.png   --size 1024 --out_dir explore/lfp_recon_dinov2/pattern16_001
+```
+
+DINOv2 score on 3 pattern16 samples:
+
+```text
+sample  LFP frac  global_cls_cos  mask_patch_cos  outside_patch_cos  mask_change
+001     6.71%     0.6986          0.3154          0.8754             0.6846
+002     6.23%     0.6147          0.3210          0.8158             0.6790
+003     1.61%     0.7537          0.3877          0.9080             0.6123
+```
+
+Interpretation: mask-region DINOv2 patch similarity drops to ~0.32–0.39 while
+outside stays ~0.82–0.91, so the fill/reconstruct operation changes the masked
+defect region far more than the background. `mask_change = 1 - mask_patch_cos`
+is the restoration/change score (higher = more changed inside LFP mask).
