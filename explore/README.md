@@ -72,3 +72,39 @@ v1 / raw = 1.247
 
 So at 2048 the area ratio is 1.25x, not the 4–6x seen at 512. The ratio must
 be measured at the target resolution.
+
+
+## Smaller-side foreground rule (user correction)
+
+The standard LFP polarity is: for each channel, after Otsu, keep the
+**smaller-area side** as foreground, then union channels. The earlier per-channel
+Otsu grid was only a threshold diagnostic and did not apply that polarity.
+
+Re-ran with the smaller-side rule on Qwen-Image-2.1 2048:
+
+```text
+channels = 64
+union_smaller_side_area_latent = 8018 / 16384
+union_smaller_side_fraction_latent = 0.4894
+literal 64ch union = 8018 / 16384  (same result)
+aggregate Otsu v1 = 1787 / 16384 = 0.1091 latent
+```
+
+Visuals:
+
+```text
+vae_all_channels_smaller_side.png
+v1_union_smaller_side_raw.png
+```
+
+Result: for Qwen's 64-channel VAE, the smaller-side per-channel union still
+covers 48.94% of the latent grid, so the standard 4-channel union rule does not
+transfer directly. Many channels select the same large Otsu side.
+
+Options:
+
+```text
+1. keep aggregate Otsu for Qwen 2.1 (current code)
+2. test selecting a subset of channels (e.g. top-4 by footprint overlap)
+3. use a 4-channel VAE (SDXL/PixArt) when strict LFP-4ch is required
+```

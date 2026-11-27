@@ -132,6 +132,17 @@ def main():
             pol = above if not above_minority else ~above
         ch_pol.append(pol)
     union_all = np.any(np.stack(ch_pol, 0), axis=0)
+    # user rule: each channel's smaller Otsu side is foreground; then union
+    ch_small = []
+    for c in range(C):
+        a = z[c]; lo, hi = float(a.min()), float(a.max())
+        if hi - lo <= 1e-6:
+            above = np.zeros_like(a, bool)
+        else:
+            t = _otsu((a - lo) / (hi - lo)); above = a > lo + t * (hi - lo)
+        below = ~above
+        ch_small.append(above if above.sum() <= below.sum() else below)
+    union_small = np.any(np.stack(ch_small, 0), axis=0)
     # channel grids
     cell = 128; cols = 8; rows = int(np.ceil(C / cols)); pad = 6
     grid = Image.new("RGB", (cols * cell, rows * (cell + 18)), (255, 255, 255)); dd = ImageDraw.Draw(grid)
@@ -144,7 +155,15 @@ def main():
         od.text((x + 4, y + 2), f"ch{c:02d} otsu", fill=(0, 0, 0))
     grid.save(out / "vae_all_channels.png")
     ogrid.save(out / "vae_all_channels_otsu.png")
+    # smaller-side foreground grid
+    sgrid = Image.new("RGB", (cols * cell, rows * (cell + 18)), (255, 255, 255)); sgd = ImageDraw.Draw(sgrid)
+    for c in range(C):
+        x = (c % cols) * cell; y = (c // cols) * (cell + 18)
+        sgrid.paste(bin_img(ch_small[c], cell - 4).convert("RGB"), (x + 2, y + 16))
+        sgd.text((x + 4, y + 2), f"ch{c:02d} small", fill=(0, 0, 0))
+    sgrid.save(out / "vae_all_channels_smaller_side.png")
     Image.fromarray((union_all.astype(np.uint8) * 255), mode="L").save(out / "v1_union_all64_raw.png")
+    Image.fromarray((union_small.astype(np.uint8) * 255), mode="L").save(out / "v1_union_smaller_side_raw.png")
     # main step sheet
     def h(a): return heat_rgb(a, 400)
     def b(a): return bin_img(a.astype(bool), 400)
@@ -202,6 +221,8 @@ def main():
         "footprint_area": int(d["footprint"].sum()),
         "union_all64_area_latent": int(union_all.sum()),
         "union_all64_fraction_latent": float(union_all.mean()),
+        "union_smaller_side_area_latent": int(union_small.sum()),
+        "union_smaller_side_fraction_latent": float(union_small.mean()),
         "support_before_area": int(d["support_before"].sum()),
         "support_polarity_area": int(d["support_polarity"].sum()),
         "support_union_area": int(d["support_union"].sum()),
