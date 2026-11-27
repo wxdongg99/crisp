@@ -44,10 +44,23 @@ LFP v1 steps:
 10 Otsu threshold histogram
 ```
 
-Important: the real Qwen LFP v1 does **not** threshold each of the 64
-channels independently. It computes the mean absolute response over channels
-and runs one Otsu threshold on that aggregate. The 64-channel per-channel Otsu
-grid is diagnostic only, to show how individual latent channels behave.
+Important: the standard 4-channel LFP (`highres/lfp_mask.py`) does
+per-channel Otsu + polarity, then **unions the channels**. That is correct for a
+4-channel VAE (SDXL/PixArt).
+
+Qwen-Image-2.1 has a 64-channel VAE. Applying the literal 64-channel union here
+covers 49% of the latent grid (`union_all64_area_latent=8018/16384`), i.e. it
+saturates into a huge region. The Qwen helper therefore deviates: it computes
+`mean_c |z_c|` and performs one aggregate Otsu, followed by maxpool-footprint
+polarity correction, trim, bilinear merge and hole fill. The per-channel Otsu
+grid is diagnostic only.
+
+So:
+
+```text
+4ch VAE LFP v1: per-channel Otsu -> union
+Qwen 64ch LFP v1: mean response -> aggregate Otsu (deviation, because union saturates)
+```
 
 Measured on this 2048 mask:
 

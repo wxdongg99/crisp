@@ -116,6 +116,22 @@ def main():
             ch_otsu.append(np.zeros_like(a, bool)); ch_thr.append(0.0)
         else:
             t = _otsu((a - lo) / (hi - lo)); ch_otsu.append(a > lo + t * (hi - lo)); ch_thr.append(t)
+    # diagnostic: literal 64-channel Otsu union (the normal 4-channel LFP rule)
+    white_minority = float(m.mean().item()) < 0.5
+    ch_pol = []
+    for c in range(C):
+        a = z[c]; lo, hi = float(a.min()), float(a.max())
+        if hi - lo <= 1e-6:
+            above = np.zeros_like(a, bool)
+        else:
+            t = _otsu((a - lo) / (hi - lo)); above = a > lo + t * (hi - lo)
+        above_minority = bool(above.sum() < above.size / 2)
+        if white_minority:
+            pol = above if above_minority else ~above
+        else:
+            pol = above if not above_minority else ~above
+        ch_pol.append(pol)
+    union_all = np.any(np.stack(ch_pol, 0), axis=0)
     # channel grids
     cell = 128; cols = 8; rows = int(np.ceil(C / cols)); pad = 6
     grid = Image.new("RGB", (cols * cell, rows * (cell + 18)), (255, 255, 255)); dd = ImageDraw.Draw(grid)
@@ -128,6 +144,7 @@ def main():
         od.text((x + 4, y + 2), f"ch{c:02d} otsu", fill=(0, 0, 0))
     grid.save(out / "vae_all_channels.png")
     ogrid.save(out / "vae_all_channels_otsu.png")
+    Image.fromarray((union_all.astype(np.uint8) * 255), mode="L").save(out / "v1_union_all64_raw.png")
     # main step sheet
     def h(a): return heat_rgb(a, 400)
     def b(a): return bin_img(a.astype(bool), 400)
@@ -183,6 +200,8 @@ def main():
         "otsu_threshold_normalized": float(d["thr"]),
         "resp_min": float(resp.min()), "resp_max": float(resp.max()),
         "footprint_area": int(d["footprint"].sum()),
+        "union_all64_area_latent": int(union_all.sum()),
+        "union_all64_fraction_latent": float(union_all.mean()),
         "support_before_area": int(d["support_before"].sum()),
         "support_polarity_area": int(d["support_polarity"].sum()),
         "support_union_area": int(d["support_union"].sum()),
