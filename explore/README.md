@@ -203,3 +203,35 @@ I_recon_v1.png
 I_recon_v3.png
 stats_v1_v3.txt
 ```
+
+## KID + IC-LPIPS for SDXL 10k 500x4
+
+Script: `explore/eval_kid_iclpips_zju.py`  
+Output: `explore/kid_iclpips_sdxl10k.csv`
+
+Eval setup:
+
+```text
+real: /home/cc/Documents/anomalydiffusion/anomalydiffusion/zju_leaper_native512/fabric/test/pattern16..19
+  (18 real test images per pattern)
+gen : /media/cc/U2-Server/crisp-storage/b300-repo/datasets/generated/zju512_sdxl_10k_native512/fabric/pattern16..19/image
+  (500 generated images per pattern)
+KID: InceptionV3 features, subset=min(50, n_real)=18, subsets=100, x1e3, lower is better
+IC-LPIPS: support-clustered VGG-LPIPS, first 1/3 of real images as support centers,
+          cluster cap=50, mean pairwise LPIPS inside each nearest-support cluster
+```
+
+Results:
+
+| pattern | n_real | n_gen | KID x1e3 | KID std x1e3 | IC-LPIPS |
+|---|---:|---:|---:|---:|---:|
+| pattern16 | 18 | 500 | 118.218 | 11.633 | 0.2614 |
+| pattern17 | 18 | 500 | 124.890 | 10.216 | 0.3267 |
+| pattern18 | 18 | 500 | 219.020 | 27.781 | 0.3279 |
+| pattern19 | 18 | 500 | 95.942 | 14.697 | 0.1968 |
+| mean | 18 | 500 | **139.517** | — | **0.2782** |
+
+Dependencies: `torchmetrics`, `torch-fidelity`, `lpips`.
+`KernelInceptionDistance` is imported from `torchmetrics.image.kid`.
+The reference metric script is
+`/media/cc/U2-local/pycharm_project/anomal_diffusion/anomalydiffusion/tools/eval_t1_generation_quality.py`.
