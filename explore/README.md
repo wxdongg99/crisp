@@ -121,7 +121,8 @@ I_ori
 -> z_orig = VAE.encode(I_ori)
 I_fill = I_ori with LFP mask replaced by solid color (mean of normal pixels)
 -> z_fill = VAE.encode(I_fill)
-z_recon = (1 - M_lfp_latent) * z_orig + M_lfp_latent * z_fill
+z_recon = z_fill.clone()
+z_recon[mask outside] = z_orig[mask outside]   # only LFP-mask latent is replaced
 I_recon = VAE.decode(z_recon)
 DINOv2 cosine(I_recon, I_ori)
 ```
@@ -145,3 +146,18 @@ Interpretation: mask-region DINOv2 patch similarity drops to ~0.32–0.39 while
 outside stays ~0.82–0.91, so the fill/reconstruct operation changes the masked
 defect region far more than the background. `mask_change = 1 - mask_patch_cos`
 is the restoration/change score (higher = more changed inside LFP mask).
+
+On pattern16/001 the latent check is exact:
+
+```text
+latent_absdiff_inside_mask  = 32.6478
+latent_absdiff_outside_mask = 0.0000
+```
+
+So outside the LFP latent mask `z_orig` is byte-identical; only the mask region
+is replaced by `z_fill`. Visuals:
+
+```text
+recon_compare.png        # I_ori / mask / I_fill / I_recon
+latent_recon_compare.png # z_orig / z_fill / z_recon / |z_recon-z_orig|*mask
+```

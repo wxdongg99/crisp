@@ -98,7 +98,9 @@ def main():
     # latent-size LFP mask (nearest)
     ml = F.interpolate(torch.from_numpy((m.astype(np.float32)))[None, None].to(dev),
                        size=z_orig.shape[-2:], mode="nearest")
-    z_recon = (1 - ml) * z_orig + ml * z_fill
+    # Explicit latent restoration: start from z_fill, put z_orig back outside LFP.
+    z_recon = z_fill.clone()
+    z_recon = torch.where(ml > 0.5, z_fill, z_orig)
     with torch.no_grad():
         I_recon = decode(vae, z_recon)
     I_recon.save(out / "I_recon.png")
@@ -117,6 +119,21 @@ def main():
     g = np.clip((grid + 1) / 2, 0, 1)
     heat = (g * 255).astype(np.uint8)
     Image.fromarray(heat, mode="L").resize((args.size, args.size), Image.Resampling.BILINEAR).save(out / "dinov2_patch_cosine.png")
+    # latent-level visualization (mean over 64 channels)
+    def latent_heat(t):
+        a = t[0].float().mean(0).cpu().numpy()
+        lo, hi = float(a.min()), float(a.max()); n = (a - lo) / max(hi - lo, 1e-8)
+        r = np.clip(n * 2, 0, 1); b = np.clip((1 - n) * 2, 0, 1); g = np.clip(1 - np.abs(n * 2 - 1), 0, 1)
+        return Image.fromarray((np.stack([r, g, b], -1) * 255).astype(np.uint8)).resize((args.size, args.size), Image.Resampling.BILINEAR)
+    zmask = (ml[0, 0] > 0.5).float()
+    lat_diff = (z_recon - z_orig).abs().mean(0) * zmask
+    lat_panels = [("z_orig mean", latent_heat(z_orig)), ("z_fill mean", latent_heat(z_fill)),
+                  ("z_recon mean", latent_heat(z_recon)), ("|z_recon-z_orig| × mask", latent_heat(lat_diff[None]))]
+    lW = 420
+    lsheet = Image.new("RGB", (lW * 4, lW + 30), (255, 255, 255)); ld = ImageDraw.Draw(lsheet)
+    for i, (lab, im) in enumerate(lat_panels):
+        lsheet.paste(im.resize((lW - 8, lW - 8), Image.Resampling.LANCZOS), (i * lW + 4, 26)); ld.text((i * lW + 6, 6), lab, fill=(0, 0, 0))
+    lsheet.save(out / "latent_recon_compare.png")
     # visualization sheet
     panels = [("I_ori", I_ori), ("LFP v3 mask", lfp.convert("RGB")), ("I_fill", I_fill), ("I_recon", I_recon)]
     W, H = 420, 460
@@ -132,7 +149,9 @@ def main():
         f"dinov2_patch_cosine_outside_mean={outside_cos:.6f}\n"
         f"dinov2_mask_change_1_minus_cos={1.0-mask_cos:.6f}\n"
         f"dinov2_global_change_1_minus_cls={1.0-cls_cos:.6f}\n"
-        f"dinov2_patch_grid={grid.shape[0]}x{grid.shape[1]}\n")
+        f"dinov2_patch_grid={grid.shape[0]}x{grid.shape[1]}\n"
+        f"latent_absdiff_inside_mask={float(((z_recon-z_orig).abs()*zmask).sum()/zmask.sum().clamp_min(1)):.6f}\n"
+        f"latent_absdiff_outside_mask={float(((z_recon-z_orig).abs()*(1-zmask)).sum()/(1-zmask).sum().clamp_min(1)):.6f}\n")
     print(open(out / "stats.txt").read())
     print("saved", out / "recon_compare.png")
 
