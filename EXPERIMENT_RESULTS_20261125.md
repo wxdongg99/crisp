@@ -206,3 +206,17 @@ compares Stage-B configurations only.
 - Increasing `cfg_b` to 3 hurts classification (61.25) and does not improve
   localization over `cfg_b=1`.
 - Stage-B still does not beat the A-only classification result (82.50).
+
+## Stage-A 40k localization baseline (2026-11-27)
+
+Best checkpoint evaluated with `test-localization.py` on the same `loc_data` view.
+
+| Experiment | AUROC-I | AP-I | F1-I | AUROC-P | AP-P | F1-P | PRO |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **Stage-A 40k** | 97.6 | 99.4 | 95.9 | **90.0** | 49.7 | 46.5 | **50.7** |
+| Stage-B cfg_a=3, cfg_b=1 | 100.0 | 100.0 | 100.0 | 86.4 | **51.9** | **49.3** | 48.4 |
+| Stage-B cfg_a=3, cfg_b=3 | 96.9 | 99.2 | 94.7 | 84.8 | 40.7 | 39.4 | 45.1 |
+| Stage-B cfg_a=1, cfg_b=1 | 100.0 | 100.0 | 100.0 | 80.1 | 35.7 | 38.3 | 42.0 |
+
+Stage-A wins AUROC-P (90.0) and PRO (50.7); Stage-B cfg3b1 wins AP-P
+(51.9) and F1-P (49.3), but is lower on AUROC-P/PRO.
