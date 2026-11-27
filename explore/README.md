@@ -235,3 +235,41 @@ Dependencies: `torchmetrics`, `torch-fidelity`, `lpips`.
 `KernelInceptionDistance` is imported from `torchmetrics.image.kid`.
 The reference metric script is
 `/media/cc/U2-local/pycharm_project/anomal_diffusion/anomalydiffusion/tools/eval_t1_generation_quality.py`.
+
+
+## All 18x4 ZJU anomaly LFP visualization
+
+Script: `explore/visualize_zju_lfp_all.py`  
+Output: `explore/zju_lfp_all/`
+
+Each cell is a 2x2 mini panel:
+
+```text
+top-left:  source
+top-right: GT anomaly mask
+bottom-left:  LFP v1 contour (blue) on source
+bottom-right: LFP v3 contour (green) on source
+```
+
+Files:
+
+```text
+pattern16_lfp_v1_v3.png ... pattern19_lfp_v1_v3.png
+zju_18x4_lfp_v1_v3_all.jpg
+lfp_area_stats.csv
+```
+
+Area ratios (v1/raw) at 512:
+
+```text
+pattern16: mean 3.36, range 0.00–10.11
+pattern17: mean 5.81, range 1.36–8.65
+pattern18: mean 6.10, range 3.57–8.52
+pattern19: mean 6.34, range 0.00–9.33
+```
+
+Important: many thin ZJU anomaly masks produce LFP supports that are much
+larger than the GT line, and several v1 contours are not visibly centered on the
+GT anomaly. This is a property of the current Qwen 64-channel aggregate LFP at
+512, not a visualization-only artifact. LFP v1 and v3 have the same area by
+construction; only the shape differs slightly.
